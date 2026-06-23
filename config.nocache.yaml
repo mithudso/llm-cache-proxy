@@ -1,0 +1,19 @@
+# Bypass config — identical to config.yaml but caching OFF. Used by `cachectl.sh off`.
+model_list:
+  - model_name: "*"
+    litellm_params:
+      model: "anthropic/*"
+      api_key: os.environ/ANTHROPIC_API_KEY_REAL
+
+litellm_settings:
+  cache: false
+  callbacks: ["callback.cache_metrics"]
+
+general_settings:
+  master_key: sk-local-cache
+  pass_through_endpoints:
+    - path: "/v1/messages"
+      target: "https://api.anthropic.com/v1/messages"
+      headers:
+        x-api-key: os.environ/ANTHROPIC_API_KEY_REAL
+        anthropic-version: "2023-06-01"

@@ -1,0 +1,12 @@
+# never commit the cache store, metrics, logs, or keys
+*.log
+.env
+.env.*
+!.env.example
+proxy.pid
+# non-portable / generated
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+# the disk cache lives in ~/.llm-cache and ~/.llm-cache-a (outside repo)

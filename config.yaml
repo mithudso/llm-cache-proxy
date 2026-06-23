@@ -1,0 +1,36 @@
+# LiteLLM proxy config — local-only Anthropic cache for Claude Code.
+# Start:  cachectl.sh on   (uses this file)
+# Bypass: cachectl.sh off  (uses config.nocache.yaml)
+#
+# Claude Code wiring (see README):
+#   export ANTHROPIC_BASE_URL=http://localhost:4000
+#   export ANTHROPIC_API_KEY=sk-local-cache        # the master_key below
+# The REAL Anthropic key lives in this proxy's env as ANTHROPIC_API_KEY_REAL.
+
+model_list:
+  # Register the Anthropic models Claude Code uses. Add ids as needed.
+  - model_name: "*"                         # wildcard: pass any requested model through
+    litellm_params:
+      model: "anthropic/*"
+      api_key: os.environ/ANTHROPIC_API_KEY_REAL
+
+litellm_settings:
+  cache: true
+  cache_params:
+    type: disk
+    disk_cache_dir: ~/.llm-cache
+    ttl: 604800                              # 7 days
+    # diskcache enforces size + LRU eviction via its own size_limit (set in callback init).
+  # Custom logger: metrics + segment-dedup analytics + completion guard.
+  callbacks: ["callback.cache_metrics"]
+  # Only successful, complete responses are cacheable (LiteLLM never caches exceptions).
+  turn_off_message_logging: false
+
+general_settings:
+  master_key: sk-local-cache                 # the local virtual key Claude Code presents
+
+# NOTE: pass_through_endpoints for /v1/messages was REMOVED — it bypassed the cache
+# (bench showed 0% hits, exactly the spec's fidelity-gate prediction). litellm now
+# serves /v1/messages through its native Anthropic adapter, routing by request `model`
+# to the model_list wildcard, so litellm_settings.cache engages. Verify tool_use SSE
+# fidelity before trusting on real Claude Code traffic (spec §Fidelity gate).
