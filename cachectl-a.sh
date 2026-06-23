@@ -36,16 +36,21 @@ case "${1:-}" in
   off)  _start OFF "1" ;;     # bypass: forwards everything, caches nothing
   stop) _stop; echo "stopped." ;;
   stats)
-    [ -f "$METRICS" ] || { echo "no metrics yet ($METRICS)"; exit 0; }
+    # Prefer the live /stats endpoint (per-model dollars); fall back to the metrics log.
+    live=$(curl -s "http://localhost:$PORT/stats" 2>/dev/null || true)
+    if [ -n "$live" ]; then echo "$live"; exit 0; fi
+    [ -f "$METRICS" ] || { echo "no metrics yet ($METRICS); proxy not running"; exit 0; }
     node -e '
       const fs=require("fs");
+      const PR={haiku:[0.8e-6,4e-6],sonnet:[3e-6,15e-6],opus:[15e-6,75e-6]};
+      const price=m=>{m=(m||"").toLowerCase();for(const k in PR)if(m.includes(k))return PR[k];return [15e-6,75e-6];};
       const L=fs.readFileSync(process.argv[1],"utf8").trim().split("\n").filter(Boolean).map(JSON.parse);
       const hit=L.filter(x=>x.event==="hit"), miss=L.filter(x=>x.event==="miss"), err=L.filter(x=>x.event==="error");
       const calls=hit.length+miss.length;
       const savedIn=hit.reduce((s,x)=>s+(x.in||0),0), savedOut=hit.reduce((s,x)=>s+(x.out||0),0);
-      const usd=savedIn*15e-6+savedOut*75e-6;  // Opus list; adjust per model
+      const savedUsd=hit.reduce((s,x)=>{const[pi,po]=price(x.model);return s+(x.in||0)*pi+(x.out||0)*po;},0);
       console.log(`calls ${calls}  hits ${hit.length}  hit_rate ${calls?(100*hit.length/calls).toFixed(1):0}%  errors ${err.length}`);
-      console.log(`tokens_saved ${savedIn+savedOut} (in ${savedIn}/out ${savedOut})  ~usd_saved(Opus) $${usd.toFixed(4)}`);
+      console.log(`tokens_saved ${savedIn+savedOut} (in ${savedIn}/out ${savedOut})  usd_saved(per-model) $${savedUsd.toFixed(4)}`);
     ' "$METRICS" ;;
   *) echo "usage: $0 {on|off|stop|stats}"; exit 1 ;;
 esac
