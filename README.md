@@ -42,13 +42,19 @@ Reproduce:
 
 ## Setup
 
+Needs Node ≥ 18 and a real Anthropic key. No build step, no `npm install`.
+
 ```bash
+git clone https://github.com/mithudso/llm-cache-proxy.git && cd llm-cache-proxy
 printf 'ANTHROPIC_API_KEY_REAL=sk-ant-...\n' > .env   # your real key; gitignored
 ./cachectl-a.sh on                                    # start on :4000 (<2s)
 export ANTHROPIC_BASE_URL=http://localhost:4000        # point Claude Code / SDK at it
+export ANTHROPIC_API_KEY=anything                      # client key ignored; .env key is used
 ```
 Control: `./cachectl-a.sh on | off | stop | stats` (`off` = bypass: forwards, caches nothing).
-`bench.py` needs `anthropic`: `python3.13 -m venv .venv && .venv/bin/pip install anthropic`.
+`npm test` runs the fidelity proof; `bench.py` needs `anthropic` (`pip install anthropic`).
+
+**Full guide:** [docs/INSTALL.md](docs/INSTALL.md) — prerequisites, configuration (env vars, per-model pricing), client setup, monitoring, troubleshooting, uninstall.
 
 ## How it works
 
