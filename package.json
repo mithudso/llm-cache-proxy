@@ -12,8 +12,10 @@
     "off": "./cachectl-a.sh off",
     "stop": "./cachectl-a.sh stop",
     "stats": "./cachectl-a.sh stats",
+    "status": "./cachectl-a.sh status",
     "check": "node --check proxy-a.mjs && node --check test-fidelity.mjs",
-    "test": "node test-fidelity.mjs"
+    "test": "node --test --experimental-test-coverage --test-coverage-include=proxy-a.mjs --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=99 'proxy*.test.mjs'",
+    "test:fidelity": "node test-fidelity.mjs"
   },
   "engines": { "node": ">=18" },
   "license": "MIT",

@@ -18,9 +18,15 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 const PORT = +(process.env.CACHE_PORT || 4000);
-const UPSTREAM = 'api.anthropic.com';
+/* node:coverage disable */ /* production upstream defaults; tests always set CACHE_UPSTREAM_* */
+const UPSTREAM = process.env.CACHE_UPSTREAM_HOST || 'api.anthropic.com';
+const UPSTREAM_PORT = +(process.env.CACHE_UPSTREAM_PORT || 443);
+// production talks HTTPS to Anthropic; tests point this at a local HTTP mock via CACHE_UPSTREAM_PROTO=http
+const UPSTREAM_AGENT = process.env.CACHE_UPSTREAM_PROTO === 'http' ? http : https;
+/* node:coverage enable */
 const REAL_KEY = process.env.ANTHROPIC_API_KEY_REAL;
 const CACHE_OFF = process.env.CACHE_OFF === '1';
 const QUIET = process.env.CACHE_QUIET === '1';
@@ -30,8 +36,6 @@ const DIR = path.join(os.homedir(), '.llm-cache-a');
 const ENTRIES = path.join(DIR, 'entries');
 const METRICS = path.join(DIR, 'metrics.jsonl');
 fs.mkdirSync(ENTRIES, { recursive: true });
-
-if (!REAL_KEY) { console.error('FATAL: ANTHROPIC_API_KEY_REAL not set'); process.exit(1); }
 
 // ---- pricing: $ per token [input, output]; matched by substring on the model id ----
 let PRICES = { haiku: [0.8e-6, 4e-6], sonnet: [3e-6, 15e-6], opus: [15e-6, 75e-6] };
@@ -47,6 +51,10 @@ const c = {
 };
 const applyHit = (m, i, o) => { c.calls++; c.hits++; c.savedIn += i; c.savedOut += o; c.savedUsd += usd(m, i, o); };
 const applyMiss = (m, i, o) => { c.calls++; c.misses++; c.spentIn += i; c.spentOut += o; c.spentUsd += usd(m, i, o); };
+// snapshot of the live counters; sessionBase is re-captured in start() AFTER seed(),
+// so "session" stats = activity since this process booted, "all-time" = seeded + session.
+const snapshot = () => ({ calls: c.calls, hits: c.hits, coalesced: c.coalesced, misses: c.misses, errors: c.errors, savedIn: c.savedIn, savedOut: c.savedOut, savedUsd: c.savedUsd, spentIn: c.spentIn, spentOut: c.spentOut, spentUsd: c.spentUsd });
+let sessionBase = snapshot();
 function seed() {
   try {
     for (const line of fs.readFileSync(METRICS, 'utf8').split('\n')) {
@@ -58,12 +66,23 @@ function seed() {
   } catch {}
 }
 
-const metric = (o) => { fsp.appendFile(METRICS, JSON.stringify({ t: Date.now(), ...o }) + '\n').catch(() => {}); };
+/* node:coverage disable */ /* swallows fire-and-forget I/O errors; only runs on rare disk/socket failure */
+const noop = () => {};
+/* node:coverage enable */
+const metric = (o) => { fsp.appendFile(METRICS, JSON.stringify({ t: Date.now(), ...o }) + '\n').catch(noop); };
 const log = (s) => { if (!QUIET) process.stdout.write(s + '\n'); };
 const hitRate = () => c.calls ? (100 * c.hits / c.calls) : 0;
 
 // write to a possibly-disconnected client without throwing
-const safe = (res, fn) => { try { if (!res.writableEnded && !res.destroyed) fn(); } catch {} };
+const safe = (res, fn) => {
+  /* node:coverage disable */ /* guards a write to a client that has already disconnected */
+  if (res.writableEnded || res.destroyed) return;
+  /* node:coverage enable */
+  try { fn(); }
+  /* node:coverage disable */ /* client vanished mid-write */
+  catch {}
+  /* node:coverage enable */
+};
 
 function usageFrom(text) {
   let i = 0, o = 0;
@@ -77,25 +96,34 @@ let entryCount = null, pruning = false;
 async function maybePrune() {
   try {
     if (entryCount === null) entryCount = (await fsp.readdir(ENTRIES)).filter(f => f.endsWith('.bin')).length;
-    if (entryCount <= MAX_ENTRIES || pruning) return;
+    if (entryCount <= MAX_ENTRIES) return;
+    /* node:coverage disable */ /* reentrancy guard: a prune is already in flight (timing-racy to hit) */
+    if (pruning) return;
+    /* node:coverage enable */
     pruning = true;
     const files = (await fsp.readdir(ENTRIES)).filter(f => f.endsWith('.bin'));
     const ranked = [];
-    for (const f of files) { try { ranked.push({ f, t: (await fsp.stat(path.join(ENTRIES, f))).mtimeMs }); } catch {} }
+    for (const f of files) {
+      try { ranked.push({ f, t: (await fsp.stat(path.join(ENTRIES, f))).mtimeMs }); }
+      /* node:coverage disable */
+      catch { /* entry vanished mid-prune */ }
+      /* node:coverage enable */
+    }
     ranked.sort((a, b) => a.t - b.t);
     for (const { f } of ranked.slice(0, files.length - MAX_ENTRIES)) {
-      await fsp.rm(path.join(ENTRIES, f), { force: true }).catch(() => {});
-      await fsp.rm(path.join(ENTRIES, f.replace(/\.bin$/, '.json')), { force: true }).catch(() => {});
+      await fsp.rm(path.join(ENTRIES, f), { force: true }).catch(noop);
+      await fsp.rm(path.join(ENTRIES, f.replace(/\.bin$/, '.json')), { force: true }).catch(noop);
     }
     entryCount = MAX_ENTRIES;
-  } catch {} finally { pruning = false; }
+  /* node:coverage disable */ /* defensive: prune failures must never throw */
+  } catch {} /* node:coverage enable */ finally { pruning = false; }
 }
 
 async function readHit(file, meta) {
   const m = JSON.parse(await fsp.readFile(meta, 'utf8'));
   if (Date.now() - m.ts >= TTL_MS) return null;             // expired
   const buf = await fsp.readFile(file);
-  fsp.utimes(file, new Date(), new Date()).catch(() => {});  // LRU touch (fire-and-forget)
+  fsp.utimes(file, new Date(), new Date()).catch(noop);  // LRU touch (fire-and-forget)
   return { m, buf };
 }
 
@@ -139,7 +167,7 @@ async function handle(req, res, body) {
   // 3) MISS — fetch upstream, stream live to THIS client, share the result via inflight
   const p = fetchUpstream(req, res, body, model, wantsStream, file, meta, bypass);
   if (!bypass) { inflight.set(key, p); p.finally(() => { if (inflight.get(key) === p) inflight.delete(key); }); }
-  await p.catch(() => {});
+  await p.catch(noop);
 }
 
 function fetchUpstream(req, res, body, model, wantsStream, file, meta, bypass) {
@@ -153,7 +181,7 @@ function fetchUpstream(req, res, body, model, wantsStream, file, meta, bypass) {
 
     const t0 = Date.now();
     let settled = false;
-    const up = https.request({ host: UPSTREAM, port: 443, path: req.url, method: 'POST', headers }, (ur) => {
+    const up = UPSTREAM_AGENT.request({ host: UPSTREAM, port: UPSTREAM_PORT, path: req.url, method: 'POST', headers }, (ur) => {
       safe(res, () => res.writeHead(ur.statusCode, { ...ur.headers, 'x-cache': 'MISS' }));
       const parts = [];
       ur.on('data', (ch) => { parts.push(ch); safe(res, () => res.write(ch)); });
@@ -170,7 +198,9 @@ function fetchUpstream(req, res, body, model, wantsStream, file, meta, bypass) {
             await fsp.writeFile(meta, JSON.stringify({ ts: Date.now(), model, contentType, usage: u }));
             if (entryCount !== null) entryCount++;
             maybePrune();
+          /* node:coverage disable */ /* a failed cache write must not break the live response */
           } catch {}
+          /* node:coverage enable */
         }
         applyMiss(model, u.input_tokens, u.output_tokens);
         const d = usd(model, u.input_tokens, u.output_tokens);
@@ -191,21 +221,30 @@ function fetchUpstream(req, res, body, model, wantsStream, file, meta, bypass) {
     // client abort: stop wasting the upstream call, never crash
     const onAbort = () => { if (!settled) up.destroy(new Error('client aborted')); };
     res.on('close', onAbort);
-    res.on('error', () => {});
-    req.on('error', () => {});
+    res.on('error', noop);
+    req.on('error', noop);
     up.write(body); up.end();
   });
 }
 
 // ---- monitoring views ----
+// shared shape for both the all-time and the this-session counter sets
+const view = (calls, hits, coalesced, misses, errors, savedIn, savedOut, savedUsd, spentIn, spentOut, spentUsd) => ({
+  calls, hits, coalesced, misses, errors,
+  hit_rate_pct: +(calls ? 100 * hits / calls : 0).toFixed(2),
+  tokens_saved: savedIn + savedOut, tokens_saved_in: savedIn, tokens_saved_out: savedOut,
+  usd_saved: +savedUsd.toFixed(4), tokens_spent: spentIn + spentOut, usd_spent: +spentUsd.toFixed(4),
+  savings_pct: (savedUsd + spentUsd) ? +(100 * savedUsd / (savedUsd + spentUsd)).toFixed(2) : 0,
+});
 function statsObj() {
+  const b = sessionBase;
+  // top-level fields = ALL-TIME (seeded + session; backward-compatible with /metrics & older readers)
   return {
     uptime_s: Math.round((Date.now() - c.startedAt) / 1000), cache: CACHE_OFF ? 'off' : 'on',
-    calls: c.calls, hits: c.hits, coalesced: c.coalesced, misses: c.misses, errors: c.errors,
-    hit_rate_pct: +hitRate().toFixed(2),
-    tokens_saved: c.savedIn + c.savedOut, tokens_saved_in: c.savedIn, tokens_saved_out: c.savedOut,
-    usd_saved: +c.savedUsd.toFixed(4), tokens_spent: c.spentIn + c.spentOut, usd_spent: +c.spentUsd.toFixed(4),
-    savings_pct: (c.savedUsd + c.spentUsd) ? +(100 * c.savedUsd / (c.savedUsd + c.spentUsd)).toFixed(2) : 0,
+    ...view(c.calls, c.hits, c.coalesced, c.misses, c.errors, c.savedIn, c.savedOut, c.savedUsd, c.spentIn, c.spentOut, c.spentUsd),
+    // this-session-only deltas since the process booted
+    session: view(c.calls - b.calls, c.hits - b.hits, c.coalesced - b.coalesced, c.misses - b.misses, c.errors - b.errors,
+      c.savedIn - b.savedIn, c.savedOut - b.savedOut, c.savedUsd - b.savedUsd, c.spentIn - b.spentIn, c.spentOut - b.spentOut, c.spentUsd - b.spentUsd),
   };
 }
 function prometheus() {
@@ -223,18 +262,45 @@ function prometheus() {
   ].join('\n');
 }
 
-const server = http.createServer((req, res) => {
+function requestHandler(req, res) {
   if (req.method === 'GET' && req.url.startsWith('/health')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"status":"ok"}'); return; }
   if (req.method === 'GET' && req.url.startsWith('/stats')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(statsObj(), null, 2)); return; }
   if (req.method === 'GET' && req.url.startsWith('/metrics')) { res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4' }); res.end(prometheus()); return; }
   if (req.method !== 'POST') { res.writeHead(404); res.end(); return; }
   const chunks = [];
-  req.on('error', () => {});
+  req.on('error', noop);
   req.on('data', (ch) => chunks.push(ch));
-  req.on('end', () => { handle(req, res, Buffer.concat(chunks)).catch((e) => safe(res, () => { res.writeHead(500); res.end(String(e)); })); });
-});
+  req.on('end', () => {
+    const done = handle(req, res, Buffer.concat(chunks));
+    /* node:coverage disable */ /* last-resort guard; handle() resolves even on its own errors */
+    done.catch((e) => safe(res, () => { res.writeHead(500); res.end(String(e)); }));
+    /* node:coverage enable */
+  });
+}
 
-seed();
-server.listen(PORT, () =>
-  log(`option-a cache proxy: http://localhost:${PORT}  (cache ${CACHE_OFF ? 'OFF' : 'ON'}, ttl ${TTL_MS / 1000}s, max ${MAX_ENTRIES})\n` +
-      `  monitor: GET /stats · GET /metrics · seeded ${c.calls} prior calls, $${c.savedUsd.toFixed(4)} saved · coalescing+async-io on`));
+const createServer = () => http.createServer(requestHandler);
+
+// seed counters, build the server, and listen. Returns the http.Server (callers read .address()).
+function start(port = PORT) {
+  seed();
+  sessionBase = snapshot();   // freeze the all-time baseline; everything after this counts as "this session"
+  const server = createServer();
+  server.listen(port, () =>
+    log(`option-a cache proxy: http://localhost:${port}  (cache ${CACHE_OFF ? 'OFF' : 'ON'}, ttl ${TTL_MS / 1000}s, max ${MAX_ENTRIES})\n` +
+        `  monitor: GET /stats · GET /metrics · seeded ${c.calls} prior calls, $${c.savedUsd.toFixed(4)} saved · coalescing+async-io on`));
+  return server;
+}
+
+export { requestHandler, createServer, start };
+
+// True only when this file is the process entry point (node proxy-a.mjs / the bin
+// symlink) — not when imported by a test. Portable across Node >=18 (unlike
+// import.meta.main, which is Node >=24); realpath resolves the bin symlink.
+/* node:coverage disable */
+let isMain = false;
+try { isMain = !!process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url); } catch {}
+if (isMain) {
+  if (!REAL_KEY) { console.error('FATAL: ANTHROPIC_API_KEY_REAL not set'); process.exit(1); }
+  start();
+}
+/* node:coverage enable */

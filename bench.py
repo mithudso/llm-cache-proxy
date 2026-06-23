@@ -5,9 +5,9 @@ through the proxy, and prints cold-vs-warm cost. This produces the REAL numbers
 the design doc only modeled.
 
 Prereqs:
-  pip install -r requirements.txt
+  pip install anthropic            # requirements.txt is the deprecated LiteLLM stack
   export ANTHROPIC_API_KEY_REAL=sk-ant-...   # set in your SHELL, never in this file
-  ./cachectl.sh on
+  ./cachectl-a.sh on
 Run:
   python bench.py --identical 5 --varied 5 --model claude-haiku-4-5-20251001
 
@@ -75,7 +75,7 @@ def main():
     print(f"  identical block: naive ${naive:.5f} -> actual ${actual:.5f}  "
           f"saved {100*(naive-actual)/naive:.1f}%")
     print(f"varied block (control, all miss): ${varied_cost:.5f}")
-    print("\nNow run:  ./cachectl.sh stats   for the proxy-side ledger.")
+    print("\nNow run:  ./cachectl-a.sh stats   for the proxy-side ledger.")
 
 
 if __name__ == "__main__":

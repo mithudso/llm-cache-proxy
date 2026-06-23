@@ -30,10 +30,13 @@ write it into any tracked file. `cachectl-a.sh` sources `.env` at start.
 ## Monitoring
 - Per-request structured logs (`HIT`/`MISS`/`ERROR`) to stdout/`proxy.log`; `CACHE_QUIET=1` silences.
 - Counters (tokens/dollars saved, per model) seed from `metrics.jsonl` on boot. `GET /stats` (JSON), `GET /metrics` (Prometheus), `cachectl-a.sh stats`. Pricing override: `~/.llm-cache-a/prices.json`.
+- `cachectl-a.sh status` — operational snapshot: process up + start time, accepting-calls (via `/health`), cache on/off (via `/stats`), last call received (newest `metrics.jsonl` timestamp), and error count + recent `proxy.log` lines since this run started.
 
 ## Concurrency & tests
 - Async I/O, in-flight request coalescing (no stampede), client-abort guard, throttled LRU prune.
-- `npm test` runs `test-fidelity.mjs` — proves byte-exact cold→warm replay for streaming, tool_use, streaming+tool_use, and coalescing (needs the proxy up + a real key). 23/23 pass.
+- `npm test` runs the `proxy*.test.mjs` `node:test` suite against a local mock upstream (no network, no key) and enforces **100% line + 100% function** coverage of `proxy-a.mjs` (zero-dep, built-in coverage); branch is gated ≥99% (V8 block coverage is 100% — the ~1% gap is one logical `||`/`?:` sub-branch the runner's branch model can't attribute). Shared harness: `test-helpers.mjs`. Defensive I/O-error swallows and the production-only entrypoint are excluded via `node:coverage` comments. Coverage incl. byte-exact multi-chunk SSE replay + session/all-time stats. (Test suite needs **Node ≥22** for built-in coverage; the proxy itself still runs on **Node ≥18**.)
+- `npm run test:fidelity` runs `test-fidelity.mjs` — byte-exact cold→warm replay for streaming, tool_use, streaming+tool_use, and coalescing. Live & **paid**: needs the proxy up + a real key.
+- `proxy-a.mjs` exports `start`/`createServer`/`requestHandler` and auto-starts only as the process entry point; tests inject a mock upstream via `CACHE_UPSTREAM_HOST`/`CACHE_UPSTREAM_PORT`/`CACHE_UPSTREAM_PROTO`.
 
 ## Notes
 - Cache store + metrics live in `~/.llm-cache-a/` (outside the repo).
