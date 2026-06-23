@@ -66,6 +66,7 @@ const applyMiss = (m, i, o) => { c.calls++; c.misses++; c.spentIn += i; c.spentO
 // so "session" stats = activity since this process booted, "all-time" = seeded + session.
 const snapshot = () => ({ calls: c.calls, hits: c.hits, coalesced: c.coalesced, misses: c.misses, errors: c.errors, savedIn: c.savedIn, savedOut: c.savedOut, savedUsd: c.savedUsd, spentIn: c.spentIn, spentOut: c.spentOut, spentUsd: c.spentUsd });
 let sessionBase = snapshot();
+// Replay the metrics ledger into the counters at boot so /stats survives restarts.
 function seed() {
   try {
     for (const line of fs.readFileSync(METRICS, 'utf8').split('\n')) {
@@ -135,6 +136,7 @@ async function maybePrune() {
   } catch {} /* node:coverage enable */ finally { pruning = false; }
 }
 
+// Load a cached entry if its meta exists and is within TTL; touch it for LRU. Null = miss/expired.
 async function readHit(file, meta) {
   const m = JSON.parse(await fsp.readFile(meta, 'utf8'));
   if (Date.now() - m.ts >= TTL_MS) return null;             // expired
@@ -143,6 +145,7 @@ async function readHit(file, meta) {
   return { m, buf };
 }
 
+// Replay a cached payload to the client byte-for-byte, update hit counters, log, and broadcast.
 function serveHit(res, m, buf, label) {
   safe(res, () => { res.writeHead(200, { 'content-type': m.contentType || 'application/json', 'x-cache': label }); res.end(buf); });
   const inT = m.usage?.input_tokens || 0, outT = m.usage?.output_tokens || 0;
@@ -164,6 +167,7 @@ const broadcast = (ev) => {
   for (const m of monitors) safe(m, () => m.write(line));
 };
 
+// Core request path: hash the body to a key, then try disk-cache → coalesce → upstream fetch.
 async function handle(req, res, body) {
   let parsed = {}; try { parsed = JSON.parse(body.toString('utf8')); } catch {}
   const model = parsed.model || '';
@@ -196,6 +200,8 @@ async function handle(req, res, body) {
   await p.catch(noop);
 }
 
+// Forward to the real API, stream the response live to the client, persist a complete 200, and
+// resolve with the result so coalesced waiters can replay it. Never rejects (resolves null on error).
 function fetchUpstream(req, res, body, model, wantsStream, file, meta, bypass) {
   return new Promise((resolve) => {
     const headers = { ...req.headers };
@@ -275,6 +281,7 @@ function statsObj() {
       c.savedIn - b.savedIn, c.savedOut - b.savedOut, c.savedUsd - b.savedUsd, c.spentIn - b.spentIn, c.spentOut - b.spentOut, c.spentUsd - b.spentUsd),
   };
 }
+// Render the all-time counters in Prometheus text exposition format for GET /metrics.
 function prometheus() {
   const s = statsObj();
   return [
@@ -333,15 +340,31 @@ function start(port = PORT, host = HOST) {
   return server;
 }
 
-export { requestHandler, createServer, start };
+// Pure, side-effect-free routines are exported so they can be imported in tests and
+// invoked from the command line (see the CLI dispatch below).
+export { requestHandler, createServer, start, usageFrom, priceFor, usd, statsObj };
+
+// Command-line dispatch for the individual routines — every core method is callable
+// and testable from the shell: `node proxy-a.mjs <cmd>`. No args => run the server.
+/* node:coverage disable */ /* entrypoint CLI; the routines it calls are covered by the test suite */
+function cli(args) {
+  const [cmd, ...rest] = args;
+  if (cmd === 'stats') { seed(); sessionBase = snapshot(); process.stdout.write(JSON.stringify(statsObj(), null, 2) + '\n'); return 0; }
+  if (cmd === 'price') { process.stdout.write(JSON.stringify(priceFor(rest[0] || '')) + '\n'); return 0; }
+  if (cmd === 'usage') { process.stdout.write(JSON.stringify(usageFrom(rest.join(' '))) + '\n'); return 0; }
+  if (cmd === 'key')   { const body = Buffer.from(rest.slice(1).join(' ')); process.stdout.write(crypto.createHash('sha256').update((rest[0] || '') + '\n').update(body).digest('hex') + '\n'); return 0; }
+  process.stderr.write('llm-cache-proxy: stats | price <model> | usage <text> | key <model> <body>   (no args: start the server)\n');
+  return cmd ? 1 : 0;
+}
 
 // True only when this file is the process entry point (node proxy-a.mjs / the bin
 // symlink) — not when imported by a test. Portable across Node >=18 (unlike
 // import.meta.main, which is Node >=24); realpath resolves the bin symlink.
-/* node:coverage disable */
 let isMain = false;
 try { isMain = !!process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url); } catch {}
 if (isMain) {
+  const args = process.argv.slice(2);
+  if (args.length) process.exit(cli(args));
   if (!REAL_KEY) { console.error('FATAL: ANTHROPIC_API_KEY_REAL not set'); process.exit(1); }
   start();
 }

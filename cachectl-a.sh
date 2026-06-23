@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # cachectl-a.sh — control the Option A zero-dep Node cache proxy.
-#   ./cachectl-a.sh on | off | stop | stats | status | monitor
+#   ./cachectl-a.sh on | off | stop | stats | status | monitor | explore
 #                   setup | run | install | uninstall
 # Reads ANTHROPIC_API_KEY_REAL (+ other CACHE_* settings) from ./.env (gitignored).
 set -euo pipefail
@@ -242,9 +242,10 @@ case "${1:-}" in
   setup)     _setup ;;
   install)   _install ;;
   uninstall) _uninstall ;;
+  explore)   exec "$NODE_BIN" "$REPO/cache-explorer.mjs" "${@:2}" ;;   # TUI by default; pass --list/--json/--invalidate <key>
   run)
     # Foreground exec for a service manager (systemd/launchd ExecStart).
     [ -n "${ANTHROPIC_API_KEY_REAL:-}" ] || { echo "ANTHROPIC_API_KEY_REAL not set (run: $0 setup)." >&2; exit 1; }
     exec "$NODE_BIN" "$PROXY" ;;
-  *) echo "usage: $0 {on|off|stop|stats|status|monitor|setup|run|install|uninstall}"; exit 1 ;;
+  *) echo "usage: $0 {on|off|stop|stats|status|monitor|explore|setup|run|install|uninstall}"; exit 1 ;;
 esac
