@@ -42,13 +42,19 @@ Reproduce:
 
 ## Setup
 
+Needs Node ≥ 18 and a real Anthropic key. No build step, no `npm install`.
+
 ```bash
+git clone https://github.com/mithudso/llm-cache-proxy.git && cd llm-cache-proxy
 printf 'ANTHROPIC_API_KEY_REAL=sk-ant-...\n' > .env   # your real key; gitignored
 ./cachectl-a.sh on                                    # start on :4000 (<2s)
 export ANTHROPIC_BASE_URL=http://localhost:4000        # point Claude Code / SDK at it
+export ANTHROPIC_API_KEY=anything                      # client key ignored; .env key is used
 ```
 Control: `./cachectl-a.sh on | off | stop | stats` (`off` = bypass: forwards, caches nothing).
-`bench.py` needs `anthropic`: `python3.13 -m venv .venv && .venv/bin/pip install anthropic`.
+`npm test` runs the fidelity proof; `bench.py` needs `anthropic` (`pip install anthropic`).
+
+**Full guide:** [docs/INSTALL.md](docs/INSTALL.md) — prerequisites, configuration (env vars, per-model pricing), client setup, monitoring, troubleshooting, uninstall.
 
 ## How it works
 
@@ -99,8 +105,14 @@ Concurrency hardening in `proxy-a.mjs`:
 - **Client-abort guard** — a disconnect tears down the upstream call and never crashes the process; all client writes are guarded.
 - **Throttled prune** — entry count tracked in memory; the LRU sweep runs only when the cap is exceeded, not on every write.
 
-The only check left is a full live Claude Code agent loop end to end; the protocol-level
-fidelity it relies on is proven above.
+A real `claude -p` agent loop was run through the proxy end to end: correct output,
+streaming intact, zero proxy errors. The proxy is transparent to live Claude Code.
+
+One caveat that the live loop made concrete: **interactive Claude Code sessions do not get
+cross-run cache hits.** Claude Code's request bodies vary run to run (dynamic system prompt
+and context), so two "identical" sessions hash to different keys. Cache wins come from
+**deterministic, byte-identical repeats** (eval suites, CI, scripted SDK calls, `npm test`),
+not from live agent sessions.
 
 ## Deprecated: the LiteLLM attempt
 
