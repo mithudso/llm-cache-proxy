@@ -21,6 +21,12 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const PORT = +(process.env.CACHE_PORT || 4000);
+// Bind address. Loopback by default (the proxy spends the real key for ANY client,
+// so it must not be reachable off-box unless you opt in). Set CACHE_HOST to a LAN
+// address / 0.0.0.0 to expose it — which then REQUIRES CACHE_AUTH_TOKEN (see start()).
+const HOST = process.env.CACHE_HOST || '127.0.0.1';
+const AUTH = process.env.CACHE_AUTH_TOKEN || '';
+const isLoopbackHost = (h) => ['127.0.0.1', '::1', 'localhost'].includes(h);
 /* node:coverage disable */ /* production upstream defaults; tests always set CACHE_UPSTREAM_* */
 const UPSTREAM = process.env.CACHE_UPSTREAM_HOST || 'api.anthropic.com';
 const UPSTREAM_PORT = +(process.env.CACHE_UPSTREAM_PORT || 443);
@@ -35,6 +41,11 @@ const MAX_ENTRIES = +(process.env.CACHE_MAX_ENTRIES || 5000);
 const DIR = path.join(os.homedir(), '.llm-cache-a');
 const ENTRIES = path.join(DIR, 'entries');
 const METRICS = path.join(DIR, 'metrics.jsonl');
+// Log verbosity: silent<error<info<debug. CACHE_QUIET=1 stays as an alias for silent.
+const LOG_LEVELS = { silent: 0, error: 1, info: 2, debug: 3 };
+const LOG_LEVEL = LOG_LEVELS[process.env.CACHE_LOG_LEVEL] ?? (QUIET ? 0 : 2);
+// Default log file (in addition to stdout). Set CACHE_LOG_FILE=none to disable, or a path to override.
+const LOG_FILE = process.env.CACHE_LOG_FILE === 'none' ? '' : (process.env.CACHE_LOG_FILE || path.join(DIR, 'proxy.log'));
 fs.mkdirSync(ENTRIES, { recursive: true });
 
 // ---- pricing: $ per token [input, output]; matched by substring on the model id ----
@@ -70,7 +81,12 @@ function seed() {
 const noop = () => {};
 /* node:coverage enable */
 const metric = (o) => { fsp.appendFile(METRICS, JSON.stringify({ t: Date.now(), ...o }) + '\n').catch(noop); };
-const log = (s) => { if (!QUIET) process.stdout.write(s + '\n'); };
+// Emit a log line at the given level (default info) to stdout + the log file, if verbosity allows.
+const log = (s, level = LOG_LEVELS.info) => {
+  if (level > LOG_LEVEL) return;
+  process.stdout.write(s + '\n');
+  if (LOG_FILE) fsp.appendFile(LOG_FILE, s + '\n').catch(noop);
+};
 const hitRate = () => c.calls ? (100 * c.hits / c.calls) : 0;
 
 // write to a possibly-disconnected client without throwing
@@ -135,9 +151,18 @@ function serveHit(res, m, buf, label) {
   if (label === 'HIT-COALESCED') c.coalesced++;
   metric({ event: 'hit', model: m.model, bytes: buf.length, in: inT, out: outT, usd: d, coalesced: label === 'HIT-COALESCED' });
   log(`${label.padEnd(13)} ${m.model || '?'}  +${inT + outT}tok $${d.toFixed(5)}  | saved $${c.savedUsd.toFixed(4)} / ${c.savedIn + c.savedOut}tok  hit-rate ${hitRate().toFixed(1)}%`);
+  broadcast({ type: label, from_cache: true, model: m.model, in: inT, out: outT, usd: d });
 }
 
 const inflight = new Map();   // key -> Promise<{status, contentType, buf, model, usage}>
+
+// ---- realtime monitor: GET /monitor holds an SSE stream; every served call is broadcast live ----
+const monitors = new Set();   // open /monitor response objects
+const broadcast = (ev) => {
+  if (!monitors.size) return;
+  const line = `data: ${JSON.stringify({ t: Date.now(), ...ev })}\n\n`;
+  for (const m of monitors) safe(m, () => m.write(line));
+};
 
 async function handle(req, res, body) {
   let parsed = {}; try { parsed = JSON.parse(body.toString('utf8')); } catch {}
@@ -147,6 +172,7 @@ async function handle(req, res, body) {
   const file = path.join(ENTRIES, key + '.bin');
   const meta = path.join(ENTRIES, key + '.json');
   const bypass = CACHE_OFF || req.headers['x-cache-bypass'] === '1';
+  log(`DEBUG ${model || '?'} key=${key.slice(0, 12)} stream=${wantsStream}${bypass ? ' bypass' : ''}`, LOG_LEVELS.debug);
 
   // 1) disk cache hit
   if (!bypass) {
@@ -159,7 +185,7 @@ async function handle(req, res, body) {
       const r = await inflight.get(key);
       if (r && r.status === 200) { serveHit(res, { contentType: r.contentType, model: r.model, usage: r.usage }, r.buf, 'HIT-COALESCED'); return; }
       // first fetch was non-200/errored: replay its status+body so the waiter sees the same result
-      if (r) { safe(res, () => { res.writeHead(r.status, { 'content-type': r.contentType, 'x-cache': 'MISS-COALESCED' }); res.end(r.buf); }); return; }
+      if (r) { safe(res, () => { res.writeHead(r.status, { 'content-type': r.contentType, 'x-cache': 'MISS-COALESCED' }); res.end(r.buf); }); broadcast({ type: 'MISS-COALESCED', from_cache: false, model: r.model, status: r.status }); return; }
     } catch {}
     // fall through to own fetch if the shared one rejected
   }
@@ -206,6 +232,7 @@ function fetchUpstream(req, res, body, model, wantsStream, file, meta, bypass) {
         const d = usd(model, u.input_tokens, u.output_tokens);
         metric({ event: 'miss', model, status: ur.statusCode, bytes: buf.length, in: u.input_tokens, out: u.output_tokens, usd: d, cached: complete });
         log(`MISS          ${model || '?'}  ${ur.statusCode}  ${u.input_tokens + u.output_tokens}tok $${d.toFixed(5)}  ${Date.now() - t0}ms${complete ? ' [cached]' : ''}  | spend $${c.spentUsd.toFixed(4)}`);
+        broadcast({ type: 'MISS', from_cache: false, stored: complete, model, status: ur.statusCode, in: u.input_tokens, out: u.output_tokens, usd: d, ms: Date.now() - t0 });
         settled = true;
         resolve({ status: ur.statusCode, contentType, buf, model, usage: u });
       });
@@ -214,7 +241,8 @@ function fetchUpstream(req, res, body, model, wantsStream, file, meta, bypass) {
       safe(res, () => { if (!res.headersSent) res.writeHead(502, { 'content-type': 'application/json', 'x-cache': 'ERROR' }); res.end(JSON.stringify({ error: { type: 'proxy_error', message: String(e) } })); });
       c.calls++; c.errors++;
       metric({ event: 'error', model, err: String(e) });
-      log(`ERR           ${model || '?'}  ${String(e)}`);
+      log(`ERR           ${model || '?'}  ${String(e)}`, LOG_LEVELS.error);
+      broadcast({ type: 'ERROR', from_cache: false, model, err: String(e) });
       settled = true;
       resolve(null);
     });
@@ -263,7 +291,17 @@ function prometheus() {
 }
 
 function requestHandler(req, res) {
+  // /health is always open (liveness/systemd probes); everything else needs the token when one is set.
   if (req.method === 'GET' && req.url.startsWith('/health')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"status":"ok"}'); return; }
+  if (AUTH && req.headers['x-cache-auth'] !== AUTH) { res.writeHead(401, { 'content-type': 'application/json' }); res.end('{"error":{"type":"unauthorized","message":"missing or invalid x-cache-auth"}}'); return; }
+  // realtime monitor: hold an SSE stream; broadcast() pushes a line per served call until the client leaves.
+  if (req.method === 'GET' && req.url.startsWith('/monitor')) {
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', 'x-cache': 'MONITOR' });
+    res.write('data: {"type":"connected"}\n\n');
+    monitors.add(res);
+    res.on('close', () => monitors.delete(res));
+    return;
+  }
   if (req.method === 'GET' && req.url.startsWith('/stats')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(statsObj(), null, 2)); return; }
   if (req.method === 'GET' && req.url.startsWith('/metrics')) { res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4' }); res.end(prometheus()); return; }
   if (req.method !== 'POST') { res.writeHead(404); res.end(); return; }
@@ -281,12 +319,16 @@ function requestHandler(req, res) {
 const createServer = () => http.createServer(requestHandler);
 
 // seed counters, build the server, and listen. Returns the http.Server (callers read .address()).
-function start(port = PORT) {
+function start(port = PORT, host = HOST) {
+  // Refuse to expose the proxy off-box without an auth token — it spends the real key for any client.
+  if (!isLoopbackHost(host) && !AUTH) {
+    throw new Error(`refusing to bind non-loopback host "${host}" without CACHE_AUTH_TOKEN (the proxy spends the real API key for any client that can reach it)`);
+  }
   seed();
   sessionBase = snapshot();   // freeze the all-time baseline; everything after this counts as "this session"
   const server = createServer();
-  server.listen(port, () =>
-    log(`option-a cache proxy: http://localhost:${port}  (cache ${CACHE_OFF ? 'OFF' : 'ON'}, ttl ${TTL_MS / 1000}s, max ${MAX_ENTRIES})\n` +
+  server.listen(port, host, () =>
+    log(`option-a cache proxy: http://${host}:${port}  (cache ${CACHE_OFF ? 'OFF' : 'ON'}, ttl ${TTL_MS / 1000}s, max ${MAX_ENTRIES}, auth ${AUTH ? 'ON' : 'off'})\n` +
         `  monitor: GET /stats · GET /metrics · seeded ${c.calls} prior calls, $${c.savedUsd.toFixed(4)} saved · coalescing+async-io on`));
   return server;
 }

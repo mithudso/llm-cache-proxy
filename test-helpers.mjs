@@ -51,6 +51,7 @@ export async function boot({ responder = jsonResponder, env = {}, quiet = true, 
   process.env.CACHE_UPSTREAM_HOST = '127.0.0.1';
   process.env.CACHE_UPSTREAM_PORT = String(upPort);
   if (quiet) process.env.CACHE_QUIET = '1'; else delete process.env.CACHE_QUIET;
+  for (const k of ['CACHE_HOST', 'CACHE_AUTH_TOKEN', 'CACHE_LOG_LEVEL', 'CACHE_LOG_FILE']) delete process.env[k];
   for (const [k, v] of Object.entries(env)) process.env[k] = String(v);
 
   const mod = await import('./proxy-a.mjs');
@@ -64,6 +65,8 @@ export async function boot({ responder = jsonResponder, env = {}, quiet = true, 
     resetCount() { state.count = 0; },
     entries() { return fs.readdirSync(path.join(dir, 'entries')); },
     async close() {
+      server.closeAllConnections?.();   // drop any lingering keep-alive/SSE (e.g. /monitor) sockets
+      mock.closeAllConnections?.();
       await new Promise((r) => server.close(r));
       await new Promise((r) => mock.close(r));
       fs.rmSync(home, { recursive: true, force: true });
