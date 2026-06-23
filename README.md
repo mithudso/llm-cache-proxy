@@ -105,8 +105,14 @@ Concurrency hardening in `proxy-a.mjs`:
 - **Client-abort guard** — a disconnect tears down the upstream call and never crashes the process; all client writes are guarded.
 - **Throttled prune** — entry count tracked in memory; the LRU sweep runs only when the cap is exceeded, not on every write.
 
-The only check left is a full live Claude Code agent loop end to end; the protocol-level
-fidelity it relies on is proven above.
+A real `claude -p` agent loop was run through the proxy end to end: correct output,
+streaming intact, zero proxy errors. The proxy is transparent to live Claude Code.
+
+One caveat that the live loop made concrete: **interactive Claude Code sessions do not get
+cross-run cache hits.** Claude Code's request bodies vary run to run (dynamic system prompt
+and context), so two "identical" sessions hash to different keys. Cache wins come from
+**deterministic, byte-identical repeats** (eval suites, CI, scripted SDK calls, `npm test`),
+not from live agent sessions.
 
 ## Deprecated: the LiteLLM attempt
 
