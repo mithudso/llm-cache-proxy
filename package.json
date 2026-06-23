@@ -11,7 +11,8 @@
     "off": "./cachectl-a.sh off",
     "stop": "./cachectl-a.sh stop",
     "stats": "./cachectl-a.sh stats",
-    "check": "node --check proxy-a.mjs"
+    "check": "node --check proxy-a.mjs && node --check test-fidelity.mjs",
+    "test": "node test-fidelity.mjs"
   },
   "engines": { "node": ">=18" },
   "license": "MIT",
