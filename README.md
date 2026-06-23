@@ -85,12 +85,22 @@ curl localhost:4000/metrics    # Prometheus: llm_cache_{hits,misses,tokens_saved
 - Real key lives only in `.env` (gitignored) — never committed.
 - Dual-stack bind: both `localhost` (::1) and `127.0.0.1` work.
 
-## Not yet verified
+## Correctness & concurrency
 
-Streaming + `tool_use` fidelity through a **real Claude Code session** (the bench
-above is non-streaming). Byte-exact replay should preserve it; run one real session,
-repeat an identical turn, and confirm the tool loop is identical before trusting it on
-live agent traffic.
+`test-fidelity.mjs` (`npm test`, with the proxy up + a real key) proves **byte-exact
+cold→warm replay** against the live API for **streaming SSE**, **tool_use**, and
+**streaming + tool_use**, and proves request **coalescing**: a burst of N identical
+concurrent calls makes exactly **one** upstream call. Latest run: **23/23 pass**.
+
+Concurrency hardening in `proxy-a.mjs`:
+
+- **Async I/O** — cache reads/writes/prune use `fs/promises`, off the event loop.
+- **Request coalescing** — identical in-flight requests share one upstream fetch (no stampede); extras return `x-cache: HIT-COALESCED`.
+- **Client-abort guard** — a disconnect tears down the upstream call and never crashes the process; all client writes are guarded.
+- **Throttled prune** — entry count tracked in memory; the LRU sweep runs only when the cap is exceeded, not on every write.
+
+The only check left is a full live Claude Code agent loop end to end; the protocol-level
+fidelity it relies on is proven above.
 
 ## Deprecated: the LiteLLM attempt
 

@@ -3,13 +3,23 @@ on: [push, pull_request]
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY_REAL: ${{ secrets.ANTHROPIC_API_KEY_REAL }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Node syntax check (proxy)
-        run: node --check proxy-a.mjs
+      - name: Node syntax check (proxy + test)
+        run: |
+          node --check proxy-a.mjs
+          node --check test-fidelity.mjs
+      # Live fidelity test runs only when a real key is configured as a repo secret.
+      - name: Fidelity test (live, optional — only if ANTHROPIC_API_KEY_REAL secret is set)
+        if: ${{ env.ANTHROPIC_API_KEY_REAL != '' }}
+        run: |
+          node proxy-a.mjs & sleep 1
+          node test-fidelity.mjs
       - name: Shell syntax check
         run: |
           for f in cachectl-a.sh cachectl.sh; do bash -n "$f"; done

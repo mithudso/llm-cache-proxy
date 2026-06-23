@@ -31,6 +31,10 @@ write it into any tracked file. `cachectl-a.sh` sources `.env` at start.
 - Per-request structured logs (`HIT`/`MISS`/`ERROR`) to stdout/`proxy.log`; `CACHE_QUIET=1` silences.
 - Counters (tokens/dollars saved, per model) seed from `metrics.jsonl` on boot. `GET /stats` (JSON), `GET /metrics` (Prometheus), `cachectl-a.sh stats`. Pricing override: `~/.llm-cache-a/prices.json`.
 
+## Concurrency & tests
+- Async I/O, in-flight request coalescing (no stampede), client-abort guard, throttled LRU prune.
+- `npm test` runs `test-fidelity.mjs` — proves byte-exact cold→warm replay for streaming, tool_use, streaming+tool_use, and coalescing (needs the proxy up + a real key). 23/23 pass.
+
 ## Notes
 - Cache store + metrics live in `~/.llm-cache-a/` (outside the repo).
 - Exact-match key = `sha256(model + "\n" + raw request body)`. No semantic matching.

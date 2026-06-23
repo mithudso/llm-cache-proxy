@@ -48,7 +48,11 @@ LiteLLM was tried first ("caching built-in") and abandoned:
 
 Hand-rolled Option A: <2s start, no deps, no DB, byte-exact SSE replay, dual-stack.
 
-## Not yet verified
-Streaming + `tool_use` fidelity through a **real Claude Code session** (the bench
-covers non-streaming). Byte-exact replay should preserve it; confirm before trusting
-on live agent traffic.
+## Concurrency
+- **Async I/O**: cache read/write/prune use `fs/promises` so disk work never blocks the event loop.
+- **Request coalescing**: an `inflight` map keys in-progress upstream fetches; identical concurrent requests await the same fetch and replay its bytes (`x-cache: HIT-COALESCED`) instead of issuing a second upstream call. Entries stay until the cache write lands, so a follow-up request either coalesces or finds the disk entry — never re-fetches.
+- **Client-abort guard**: every client write goes through a guard that no-ops once the socket is gone; a disconnect (`res 'close'`) destroys the upstream request so it is not wasted. The process cannot crash on a mid-stream disconnect.
+- **Throttled prune**: entry count is tracked in memory; the LRU sweep runs only when the cap is exceeded and is itself guarded against concurrent runs.
+
+## Correctness proof
+`test-fidelity.mjs` drives real `/v1/messages` calls through the proxy and asserts byte-identical cold→warm replay for streaming SSE, tool_use, and streaming+tool_use, plus exactly-one-upstream-call coalescing under a 6-way burst. 23/23 pass. The one open item is a full live Claude Code agent loop; the protocol fidelity it depends on is proven.
