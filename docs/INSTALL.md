@@ -24,19 +24,26 @@ The proxy itself needs **only Node**. No build step, no `npm install`.
 
 ## 2. Install
 
+**Option A — npm (recommended).** Installs the `llm-cache-proxy` command (zero deps, cross-platform):
+
+```bash
+npm install -g llm-cache-proxy
+# or run without installing:  npx llm-cache-proxy <command>
+```
+
+With npm, the `llm-cache-proxy on|off|stop|stats` command replaces `./cachectl-a.sh` in the
+steps below. Run it from a directory that holds your `.env` (Step 3), or export the key.
+
+**Option B — from source:**
+
 ```bash
 git clone https://github.com/mithudso/llm-cache-proxy.git
 cd llm-cache-proxy
+chmod +x cachectl-a.sh
 ```
 
 Or download a release tarball from the [Releases page](https://github.com/mithudso/llm-cache-proxy/releases),
 unpack it, and `cd` in.
-
-Make the control script executable (clones already are):
-
-```bash
-chmod +x cachectl-a.sh
-```
 
 ---
 

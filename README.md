@@ -51,7 +51,15 @@ printf 'ANTHROPIC_API_KEY_REAL=sk-ant-...\n' > .env   # your real key; gitignore
 export ANTHROPIC_BASE_URL=http://localhost:4000        # point Claude Code / SDK at it
 export ANTHROPIC_API_KEY=anything                      # client key ignored; .env key is used
 ```
-Control: `./cachectl-a.sh on | off | stop | stats` (`off` = bypass: forwards, caches nothing).
+Or via npm (zero deps, cross-platform CLI):
+
+```bash
+npm i -g llm-cache-proxy        # or run ad hoc: npx llm-cache-proxy <cmd>
+printf 'ANTHROPIC_API_KEY_REAL=sk-ant-...\n' > .env
+llm-cache-proxy on              # on | off | stop | stats
+```
+
+Control: `llm-cache-proxy on|off|stop|stats` (npm) or `./cachectl-a.sh on|off|stop|stats` (bash); `off` = bypass.
 `npm test` runs the fidelity proof; `bench.py` needs `anthropic` (`pip install anthropic`).
 
 **Full guide:** [docs/INSTALL.md](docs/INSTALL.md) — prerequisites, configuration (env vars, per-model pricing), client setup, monitoring, troubleshooting, uninstall.
