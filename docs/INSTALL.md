@@ -24,19 +24,37 @@ The proxy itself needs **only Node**. No build step, no `npm install`.
 
 ## 2. Install
 
+Three ways. **Homebrew** is easiest on macOS/Linux; **npm** suits Node users; **source**
+gives you the bench and tests.
+
+**Option A — Homebrew:**
+
+```bash
+brew install mithudso/tap/llm-cache-proxy
+# or:  brew tap mithudso/tap && brew install llm-cache-proxy
+```
+
+**Option B — npm:**
+
+```bash
+npm install -g llm-cache-proxy        # installs the `llm-cache-proxy` command
+# or run without installing:  npx llm-cache-proxy <command>
+```
+
+With Homebrew or npm, the `llm-cache-proxy on|off|stop|stats` command replaces
+`./cachectl-a.sh` in the steps below. Run it from a directory holding your `.env`
+(Step 3), or export the key.
+
+**Option C — from source:**
+
 ```bash
 git clone https://github.com/mithudso/llm-cache-proxy.git
 cd llm-cache-proxy
+chmod +x cachectl-a.sh
 ```
 
 Or download a release tarball from the [Releases page](https://github.com/mithudso/llm-cache-proxy/releases),
 unpack it, and `cd` in.
-
-Make the control script executable (clones already are):
-
-```bash
-chmod +x cachectl-a.sh
-```
 
 ---
 
