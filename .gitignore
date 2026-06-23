@@ -8,5 +8,6 @@ proxy.pid
 .venv/
 __pycache__/
 *.pyc
+*.tgz
 .DS_Store
 # the disk cache lives in ~/.llm-cache and ~/.llm-cache-a (outside repo)
