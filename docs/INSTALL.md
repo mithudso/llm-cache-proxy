@@ -24,19 +24,40 @@ The proxy itself needs **only Node**. No build step, no `npm install`.
 
 ## 2. Install
 
+Pick one. The **clone** install gives the full control surface (`cachectl-a.sh on|off|monitor|explore|…`);
+the **Homebrew** and **npm** installs put the self-contained `llm-cache-proxy` command on your `PATH`
+(it runs the server, and the `stats|price|usage|key` subcommands).
+
+**A — Homebrew (macOS / Linux)**
+
 ```bash
-git clone https://github.com/mithudso/llm-cache-proxy.git
-cd llm-cache-proxy
+brew tap mithudso/tap
+brew install llm-cache-proxy
+llm-cache-proxy --help          # server with no args; or: llm-cache-proxy stats
+```
+
+**B — npm (global, needs Node ≥ 18)**
+
+```bash
+npm install -g llm-cache-proxy
+llm-cache-proxy                 # starts the proxy (reads ANTHROPIC_API_KEY_REAL from the env)
+# or run once without installing:
+npx llm-cache-proxy stats
+```
+
+**C — Clone or release tarball (full control surface)**
+
+```bash
+git clone https://github.com/mithudso/llm-cache-proxy.git && cd llm-cache-proxy
+chmod +x cachectl-a.sh          # clones already are
 ```
 
 Or download a release tarball from the [Releases page](https://github.com/mithudso/llm-cache-proxy/releases),
 unpack it, and `cd` in.
 
-Make the control script executable (clones already are):
-
-```bash
-chmod +x cachectl-a.sh
-```
+> The Homebrew/npm `llm-cache-proxy` binary reads the key from the `ANTHROPIC_API_KEY_REAL`
+> environment variable. The `cachectl-a.sh` control script (clone install) reads it from `.env`
+> and adds start/stop/status/monitor/service-install — see the next sections.
 
 ---
 

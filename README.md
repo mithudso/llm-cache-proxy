@@ -47,6 +47,10 @@ Reproduce:
 
 Needs Node ≥ 18 and a real Anthropic key. No build step, no `npm install`.
 
+Install the `llm-cache-proxy` command via **Homebrew** (`brew tap mithudso/tap && brew install llm-cache-proxy`)
+or **npm** (`npm install -g llm-cache-proxy`) — both put the self-contained proxy + CLI on your `PATH`.
+For the full control surface (`on`/`off`/`monitor`/`explore`/service install), clone the repo:
+
 ```bash
 git clone https://github.com/mithudso/llm-cache-proxy.git && cd llm-cache-proxy
 ./cachectl-a.sh setup                                  # prompts for key + settings, writes .env (chmod 600)
