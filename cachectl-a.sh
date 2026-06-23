@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # cachectl-a.sh — control the Option A zero-dep Node cache proxy.
 #   ./cachectl-a.sh on | off | stop | stats | status | monitor | explore
-#                   setup | run | install | uninstall
+#                   setup | run | install | uninstall | -h|--help (full guide: USAGE.md)
 # Reads ANTHROPIC_API_KEY_REAL (+ other CACHE_* settings) from ./.env (gitignored).
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -116,6 +116,16 @@ _uninstall() {
   fi
 }
 
+# Show the full usage guide (USAGE.md), paged on a TTY; fall back to a one-liner if it's missing.
+_usage() {
+  if [ -f "$REPO/USAGE.md" ]; then
+    if [ -t 1 ] && command -v less >/dev/null 2>&1; then less -R "$REPO/USAGE.md"; else cat "$REPO/USAGE.md"; fi
+  else
+    echo "usage: $0 {on|off|stop|stats|status|monitor|explore|setup|run|install|uninstall}" >&2
+    echo "  (full guide USAGE.md not found next to the script)" >&2
+  fi
+}
+
 _start() {
   if [ -z "${ANTHROPIC_API_KEY_REAL:-}" ]; then
     if [ -t 0 ]; then _setup; [ -f .env ] && { set -a; . ./.env; set +a; }; fi
@@ -137,6 +147,7 @@ _start() {
 }
 
 case "${1:-}" in
+  help|-h|--help|'-?') _usage; exit 0 ;;
   on)   _start ON "0" ;;
   off)  _start OFF "1" ;;     # bypass: forwards everything, caches nothing
   stop) _stop; echo "stopped." ;;
@@ -247,5 +258,6 @@ case "${1:-}" in
     # Foreground exec for a service manager (systemd/launchd ExecStart).
     [ -n "${ANTHROPIC_API_KEY_REAL:-}" ] || { echo "ANTHROPIC_API_KEY_REAL not set (run: $0 setup)." >&2; exit 1; }
     exec "$NODE_BIN" "$PROXY" ;;
-  *) echo "usage: $0 {on|off|stop|stats|status|monitor|explore|setup|run|install|uninstall}"; exit 1 ;;
+  '') _usage; exit 1 ;;                              # no command
+  *)  echo "unknown command: $1" >&2; _usage; exit 1 ;;   # unknown flag/command -> full guide
 esac
