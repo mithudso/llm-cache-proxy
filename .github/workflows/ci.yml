@@ -1,0 +1,17 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Node syntax check (proxy)
+        run: node --check proxy-a.mjs
+      - name: Shell syntax check
+        run: |
+          for f in cachectl-a.sh cachectl.sh; do bash -n "$f"; done
+      - name: Python syntax check (bench/callback)
+        run: python3 -m py_compile bench.py callback.py
