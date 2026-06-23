@@ -1,45 +1,83 @@
-# Local-Only LLM Cache (LiteLLM) for Claude Code
+# llm-cache-proxy
 
-Returns cached Anthropic responses from local disk with **no upstream call** on a
-byte-identical repeat — 100% token save on hits. Built for rerun/eval/CI workloads.
+Local-only, **zero-dependency** caching reverse proxy for the Anthropic Messages API.
+On an exact-match repeat it replays the byte-identical cached response with **no
+upstream call** — 100% token save per hit. Built for rerun / eval / CI / dev-loop
+workloads, where the same `/v1/messages` request recurs.
 
-## Install
-Already done in a local venv (`.venv/`, Python 3.13 — litellm needs <3.14). To rebuild:
+- One Node file, **no dependencies** (`proxy-a.mjs`).
+- Starts in **<2s**, no database, no API key juggling (reads `.env`).
+- Byte-exact SSE replay (streaming + `tool_use` preserved verbatim).
+
+## Measured token savings
+
+Side-by-side, 5 identical `/v1/messages` calls (Haiku) through the proxy, cache ON
+vs bypass (`cachectl-a.sh off`). Measured via `bench.py` + the proxy ledger:
+
+| Metric | Cache **OFF** (bypass) | Cache **ON** |
+|---|---|---|
+| Hit rate | 0% | **80%** |
+| Upstream calls (for 5 identical) | 5 | **1** |
+| Tokens billed | all 5 calls | **1 call** (4 served free) |
+| Tokens saved (ledger) | 0 | **296** |
+| Warm-call latency | **1.141 s** | **0.001 s** (~1000× faster) |
+
+**Savings ≈ your full-call repeat rate.** With N identical calls the cache eliminates
+(N−1) of them — here 4/5 = 80%. On a rerun/eval/CI suite that re-issues the same
+prompts, that is a direct ~80%+ cut in tokens *and* latency on the repeated portion.
+
+Caveat: only **exact full-call repeats** hit. Novel calls (different messages) are
+never cached — so interactive, always-different traffic sees little benefit. This is a
+rerun/eval/CI optimizer, not a general speedup. (`bench.py`'s own "saved %" line is a
+client-side artifact — a cached response still carries usage numbers, so the SDK can't
+tell it was free; the proxy ledger and the 0.001 s latency are ground truth.)
+
+Reproduce:
 ```bash
-python3.13 -m venv .venv --clear
-./.venv/bin/pip install -r requirements.txt
+./cachectl-a.sh on
+.venv/bin/python bench.py --identical 5 --varied 0 --model claude-haiku-4-5-20251001 \
+  --base-url http://localhost:4000
+./cachectl-a.sh stats          # hit rate + tokens/$ saved
 ```
-`cachectl.sh` runs litellm from `.venv` automatically.
 
-## Run
+## Setup
+
 ```bash
-export ANTHROPIC_API_KEY_REAL=sk-ant-...      # your REAL Anthropic key — SHELL env, never a file
-./cachectl.sh on                              # start proxy + cache on :4000
-# in the Claude Code shell:
-export ANTHROPIC_BASE_URL=http://localhost:4000
-export ANTHROPIC_API_KEY=sk-local-cache       # the local virtual key
+printf 'ANTHROPIC_API_KEY_REAL=sk-ant-...\n' > .env   # your real key; gitignored
+./cachectl-a.sh on                                    # start on :4000 (<2s)
+export ANTHROPIC_BASE_URL=http://localhost:4000        # point Claude Code / SDK at it
 ```
-Bypass: `./cachectl.sh off` (proxy stays up, caching disabled).
-Stop: `./cachectl.sh stop`. Stats: `./cachectl.sh stats`.
+Control: `./cachectl-a.sh on | off | stop | stats` (`off` = bypass: forwards, caches nothing).
+`bench.py` needs `anthropic`: `python3.13 -m venv .venv && .venv/bin/pip install anthropic`.
 
-## Verify it actually saves (the real numbers)
-```bash
-python bench.py --identical 5 --varied 5 --model claude-haiku-4-5-20251001
-./cachectl.sh stats
-```
-Expect the identical block to drop ~80% (1 cold + 4 hits); varied block unchanged.
+## How it works
 
-## Fidelity gate (do this before trusting it for real work)
-LiteLLM may not reproduce Anthropic-native streaming `tool_use`/`thinking` framing
-byte-for-byte. Run a real Claude Code tool-use turn twice (miss, then hit) and confirm
-the tool loop behaves identically. If it breaks and config can't fix it, fall back to a
-hand-rolled byte-exact reverse proxy (spec §Fidelity gate).
+Reverse proxy in front of `api.anthropic.com`. Exact-match key =
+`sha256(model + raw request body)`. HIT → replay stored bytes, zero upstream call.
+MISS → forward with the real key, tee the response to client + cache (complete 200s only).
+Cache + metrics live in `~/.llm-cache-a/` (outside the repo). See
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Guardrails
-- Only complete 200 responses are cached (errors/partials skipped).
-- `~/.llm-cache` disk store, 7d TTL, 2 GB LRU cap.
-- Fail-open: cache faults forward upstream, never block a turn.
-- Plaintext local store — `~/.llm-cache` is gitignored; don't commit it.
 
-Files: `config.yaml` (cache on), `config.nocache.yaml` (bypass), `callback.py`
-(metrics + segment analytics), `cachectl.sh` (control), `bench.py` (measurement).
+- Only complete `200` responses cached (streaming requires `message_stop`).
+- TTL 7d (`CACHE_TTL_SEC`), LRU prune at `CACHE_MAX_ENTRIES` (5000).
+- Fail-open: upstream/proxy errors forward to the client; never break a turn.
+- Real key lives only in `.env` (gitignored) — never committed.
+- Dual-stack bind: both `localhost` (::1) and `127.0.0.1` work.
+
+## Not yet verified
+
+Streaming + `tool_use` fidelity through a **real Claude Code session** (the bench
+above is non-streaming). Byte-exact replay should preserve it; run one real session,
+repeat an identical turn, and confirm the tool loop is identical before trusting it on
+live agent traffic.
+
+## Deprecated: the LiteLLM attempt
+
+`config.yaml`, `config.nocache.yaml`, `callback.py`, `cachectl.sh`, `requirements.txt`
+are an abandoned LiteLLM-based attempt, kept for history. LiteLLM was dropped: ~87s
+import, >120s flaky startup, the `/v1/messages` passthrough route bypassed the cache
+(0% hits), and `master_key`+wildcard routing required a Prisma DB. The hand-rolled
+Node proxy (`proxy-a.mjs`) replaced it. Details in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#decision-record-why-hand-rolled-not-litellm).
