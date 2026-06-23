@@ -27,6 +27,10 @@ export ANTHROPIC_BASE_URL=http://localhost:4000
 The real Anthropic key lives ONLY in `.env` (gitignored). Never commit it; never
 write it into any tracked file. `cachectl-a.sh` sources `.env` at start.
 
+## Monitoring
+- Per-request structured logs (`HIT`/`MISS`/`ERROR`) to stdout/`proxy.log`; `CACHE_QUIET=1` silences.
+- Counters (tokens/dollars saved, per model) seed from `metrics.jsonl` on boot. `GET /stats` (JSON), `GET /metrics` (Prometheus), `cachectl-a.sh stats`. Pricing override: `~/.llm-cache-a/prices.json`.
+
 ## Notes
 - Cache store + metrics live in `~/.llm-cache-a/` (outside the repo).
 - Exact-match key = `sha256(model + "\n" + raw request body)`. No semantic matching.

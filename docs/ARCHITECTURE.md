@@ -32,6 +32,13 @@ All outside the repo.
 - **Plaintext** key in `.env` (gitignored) and plaintext local cache.
 - **Dual-stack bind** (`::` ⇒ both `localhost`/::1 and 127.0.0.1).
 
+## Logging & monitoring
+
+- **Per-request log line** on stdout (`HIT`/`MISS`/`ERROR`) with model, tokens, dollars, latency, and the running cumulative-savings tail. `CACHE_QUIET=1` silences it.
+- **In-memory counters**: calls, hits, misses, errors, tokens/dollars saved (hits), tokens/dollars spent (misses). Seeded from `metrics.jsonl` at boot so totals survive restarts.
+- **Endpoints** (read-only, no auth): `GET /stats` (JSON) and `GET /metrics` (Prometheus text — `llm_cache_*_total`). `/health` unchanged.
+- **Per-model pricing**: `$ per token` matched by substring on the model id (haiku/sonnet/opus, default = opus). Override via `~/.llm-cache-a/prices.json`. Dollars are computed at read time, so a price change re-values history.
+
 ## Decision record (why hand-rolled, not LiteLLM)
 LiteLLM was tried first ("caching built-in") and abandoned:
 - `import litellm` ≈ 87s (blocking model-cost-map fetch); full proxy startup >120s, variable.

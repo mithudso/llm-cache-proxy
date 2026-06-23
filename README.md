@@ -58,6 +58,25 @@ MISS → forward with the real key, tee the response to client + cache (complete
 Cache + metrics live in `~/.llm-cache-a/` (outside the repo). See
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+## Logging & monitoring
+
+Every request emits one structured log line on stdout (captured in `~/.llm-cache-a/proxy.log`):
+
+```
+HIT  claude-haiku-4-5-20251001  +76tok $0.00025  | saved $0.0007 / 228tok  hit-rate 33.3%
+MISS claude-haiku-4-5-20251001  200  274tok $0.00104  3951ms [cached]  | spend $0.0013
+```
+
+Running counters track **tokens and dollars saved** (cache hits) versus dollars spent (misses), priced **per model**. They seed from the metrics log on boot, so totals survive a restart. Two read-only endpoints expose them:
+
+```bash
+curl localhost:4000/stats      # JSON: calls, hits, hit_rate_pct, tokens_saved, usd_saved, usd_spent, savings_pct
+curl localhost:4000/metrics    # Prometheus: llm_cache_{hits,misses,tokens_saved,usd_saved,...}_total
+./cachectl-a.sh stats          # pretty-prints /stats when the proxy is up; else reads the log
+```
+
+`/metrics` drops straight into Prometheus/Grafana. Pricing is matched by model substring (haiku/sonnet/opus); override or extend it with `~/.llm-cache-a/prices.json` (`{"haiku":[0.8e-6,4e-6]}`). Set `CACHE_QUIET=1` to silence per-request logs (endpoints still work).
+
 ## Guardrails
 
 - Only complete `200` responses cached (streaming requires `message_stop`).
