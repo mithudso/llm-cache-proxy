@@ -153,7 +153,7 @@ case "${1:-}" in
   stop) _stop; echo "stopped." ;;
   stats)
     # Prefer the live /stats endpoint (this-session + all-time); fall back to the metrics log.
-    live=$(curl -s "${AUTH_HDR[@]}" "http://localhost:$PORT/stats" 2>/dev/null || true)
+    live=$(curl -s ${AUTH_HDR[@]+"${AUTH_HDR[@]}"} "http://localhost:$PORT/stats" 2>/dev/null || true)
     if [ -n "$live" ]; then
       printf '%s' "$live" | node -e '
         let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
@@ -193,7 +193,7 @@ case "${1:-}" in
     fi
 
     # 2) accepting calls? (and 3) cache on/off) — straight from the live endpoints
-    live=$(curl -s "${AUTH_HDR[@]}" "http://localhost:$PORT/stats" 2>/dev/null || true)
+    live=$(curl -s ${AUTH_HDR[@]+"${AUTH_HDR[@]}"} "http://localhost:$PORT/stats" 2>/dev/null || true)
     health=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$PORT/health" 2>/dev/null || true)
     if [ "$health" = "200" ]; then
       echo "accepting calls: YES (GET /health -> 200)"
@@ -237,7 +237,7 @@ case "${1:-}" in
   monitor)
     # Realtime view: tail the proxy's /monitor SSE stream, one readable line per call.
     echo "live monitor — http://localhost:$PORT/monitor  (Ctrl-C to stop)"
-    curl -sN "${AUTH_HDR[@]}" "http://localhost:$PORT/monitor" | while IFS= read -r line; do
+    curl -sN ${AUTH_HDR[@]+"${AUTH_HDR[@]}"} "http://localhost:$PORT/monitor" | while IFS= read -r line; do
       case "$line" in
         data:*) printf '%s' "${line#data: }" | node -e '
           let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
