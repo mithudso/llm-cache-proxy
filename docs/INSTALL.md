@@ -41,9 +41,9 @@ npm install -g llm-cache-proxy        # installs the `llm-cache-proxy` command
 # or run without installing:  npx llm-cache-proxy <command>
 ```
 
-With Homebrew or npm, the `llm-cache-proxy on|off|stop|stats` command replaces
-`./cachectl-a.sh` in the steps below. Run it from a directory holding your `.env`
-(Step 3), or export the key.
+With Homebrew or npm, `llm-cache-proxy on|off|restart|stop|stats|setup|validate` replaces
+`./cachectl-a.sh`. The first `llm-cache-proxy on` prompts for your key and writes it to
+`~/.llm-cache-a/.env` automatically — no separate Step 3 required.
 
 **Option C — from source:**
 
@@ -60,14 +60,22 @@ unpack it, and `cd` in.
 
 ## 3. Configure the key
 
-The proxy reads your **real** key from a gitignored `.env` file. This is the only place the
-key lives. Never commit it.
+**Homebrew/npm:** skip this step — `llm-cache-proxy on` will prompt for your key on first run and write it to `~/.llm-cache-a/.env` (chmod 600) automatically.
+
+**Source install:** the proxy reads your real key from a gitignored `.env` in the repo root. The easiest way:
 
 ```bash
-printf 'ANTHROPIC_API_KEY_REAL=sk-ant-your-real-key\n' > .env
+./cachectl-a.sh setup    # interactive wizard: prompts for key + port/TTL/host, writes .env (chmod 600)
 ```
 
-`cachectl-a.sh` loads `.env` automatically on start.
+Or manually:
+
+```bash
+printf 'ANTHROPIC_API_KEY_REAL=sk-ant-your-real-key\nCACHE_PORT=4000\nCACHE_HOST=127.0.0.1\n' > .env
+chmod 600 .env
+```
+
+The key lives only in `.env`. Never commit it — it is gitignored.
 
 ---
 
@@ -90,10 +98,16 @@ Control commands:
 
 | Command | Effect |
 |---|---|
-| `./cachectl-a.sh on` | start with caching enabled |
+| `./cachectl-a.sh on` | start with caching enabled (prompts for key on first run) |
 | `./cachectl-a.sh off` | start in bypass mode (forwards everything, caches nothing) |
+| `./cachectl-a.sh restart` | stop then start cleanly |
 | `./cachectl-a.sh stop` | stop the proxy |
+| `./cachectl-a.sh validate` | check config files for errors + runtime health if proxy is up |
 | `./cachectl-a.sh stats` | print live counters (tokens/dollars saved) |
+| `./cachectl-a.sh status` | full operational snapshot (process, cache mode, last call, recent errors) |
+| `./cachectl-a.sh monitor` | realtime call stream (`#seq` type model tok $ ms \| snippet) |
+
+Homebrew/npm equivalent: `llm-cache-proxy on|off|restart|stop|stats|setup|validate`
 
 To run the proxy directly (e.g. under a process manager): `ANTHROPIC_API_KEY_REAL=… node proxy-a.mjs`.
 
@@ -136,13 +150,12 @@ Run the same request twice: the second response carries `x-cache: HIT` and makes
 ## 6. Verify
 
 ```bash
-curl -s http://localhost:4000/health     # {"status":"ok"}
-npm test                                 # fidelity + concurrency proof (needs the key); expect 23/23
-curl -s http://localhost:4000/stats      # cumulative tokens/dollars saved
+./cachectl-a.sh validate        # config syntax + /health /stats /metrics check (exits 1 on error)
+curl -s localhost:4000/health   # {"status":"ok"}
+curl -s localhost:4000/stats    # JSON: calls, hits, hit_rate, tokens/dollars saved
 ```
 
-`npm test` runs `test-fidelity.mjs`, which proves byte-exact cold→warm replay for streaming,
-tool_use, and streaming+tool_use, plus request coalescing.
+`validate` is the quickest way to confirm everything is wired up correctly. It checks the key format, port, any optional config files (`normalize.json`, `prices.json`), and the live endpoints if the proxy is running.
 
 ---
 
@@ -185,12 +198,12 @@ Counters seed from `metrics.jsonl` on boot, so totals survive a restart.
 
 | Symptom | Cause / fix |
 |---|---|
-| `ERROR: ANTHROPIC_API_KEY_REAL not set` | `.env` missing or empty; recreate it (Step 3) |
-| Connection refused on `localhost` | should not happen (dual-stack bind); confirm the proxy is up: `curl 127.0.0.1:4000/health` |
-| Port already in use | another proxy is running: `./cachectl-a.sh stop`, or set `CACHE_PORT` |
-| `npm test` fails to connect | proxy not running; `./cachectl-a.sh on` first |
-| 0% hit rate | requests are not byte-identical (any field differs ⇒ a new key); the cache only hits exact full-call repeats |
-| 401 from upstream | the key in `.env` is wrong or revoked; rotate it at console.anthropic.com |
+| Not sure if configured correctly | run `./cachectl-a.sh validate` (or `llm-cache-proxy validate`) — exits 1 and names the problem |
+| `ANTHROPIC_API_KEY_REAL not set` | `.env` missing or key absent; run `./cachectl-a.sh setup` to re-create it |
+| Connection refused on `localhost` | proxy not running; `./cachectl-a.sh on` to start, `./cachectl-a.sh status` to diagnose |
+| Port already in use | another proxy is running: `./cachectl-a.sh restart`, or change `CACHE_PORT` |
+| 0% hit rate | requests are not byte-identical; the default tier only hits exact full-call repeats. Add `~/.llm-cache-a/normalize.json` if timestamps/session IDs vary |
+| 401 from upstream | the key in `.env` is wrong or revoked; rotate it at console.anthropic.com, then `./cachectl-a.sh setup` |
 
 ---
 

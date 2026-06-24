@@ -25,8 +25,10 @@ and adds start/stop/status/monitor/service-install.
 ## Quick start
 
 ```bash
-./cachectl-a.sh setup                            # prompts for the key + settings, writes .env (chmod 600)
-./cachectl-a.sh on                               # start on :4000 (<2s)
+./cachectl-a.sh on                               # first run: prompts for key + settings, writes .env (chmod 600), then starts
+# -- or, for Homebrew/npm installs --
+llm-cache-proxy on                               # same: prompts on first run, writes ~/.llm-cache-a/.env
+
 export ANTHROPIC_BASE_URL=http://localhost:4000  # point Claude Code / SDK at the proxy
 export ANTHROPIC_API_KEY=anything                # client key is ignored; the .env key is used
 ```
@@ -41,14 +43,16 @@ export ANTHROPIC_API_KEY=anything                # client key is ignored; the .e
 
 | Command | What it does |
 |---|---|
-| `on` | Start the proxy with caching **enabled** (background; writes `~/.llm-cache-a/proxy.pid` + `proxy.log`). Auto-runs `setup` if the key is missing on a TTY. |
+| `on` | Start the proxy with caching **enabled** (background; writes `~/.llm-cache-a/proxy.pid` + `proxy.log`). Auto-prompts for the key if missing (TTY only). |
 | `off` | Start in **bypass** mode — forward every request upstream, cache nothing. |
-| `stop` | Stop the running proxy. |
+| `restart` | Stop the running proxy then start it again cleanly (equivalent to `stop` + `on`). |
+| `stop` | Stop the running proxy (also unloads the launchd plist on macOS to prevent `KeepAlive` restart). |
+| `validate` | Check all config files for errors (key format, port range, `normalize.json` JSON + regex, `prices.json` schema); if the proxy is running, also hit `/health`, `/stats`, and `/metrics` and report. Exits 0 all-pass, 1 on error — safe in CI/boot scripts. |
 | `stats` | Print **this-session** and **all-time** savings (live `/stats` if up; else the on-disk ledger). |
 | `status` | Operational snapshot: process up + since when, accepting calls (`/health`), cache on/off, last call received, errors + recent log lines this run. |
-| `monitor` | Realtime view — tail `GET /monitor` (SSE) as one readable line per served call (HIT/MISS/…). Ctrl-C to stop. |
+| `monitor` | Realtime view — tail `GET /monitor` (SSE) as one readable line per served call. Shows `#seq`, type, model, tokens, cost, latency, and a response snippet. Ctrl-C to stop. |
 | `explore` | Cache explorer TUI (browse / view / invalidate). Passes flags through to `cache-explorer.mjs` (`--list`, `--json`, `--view <key>`, `--invalidate <key>`). |
-| `setup` | First-run wizard: prompt for the key + port/TTL/max/host(/token), write a `chmod 600` `.env`. |
+| `setup` | (Re-)run the key + settings wizard: prompt for key / port / TTL / max entries / bind host / auth token, write a `chmod 600` `.env`. |
 | `run` | Foreground exec of the proxy — what a service manager's `ExecStart` calls. |
 | `install` | Install a boot service that auto-restarts on failure: a **systemd** user unit (Linux) or a **launchd** agent (macOS). |
 | `uninstall` | Remove the installed boot service. |
@@ -67,8 +71,18 @@ No arguments starts the server. With a subcommand it runs that routine and exits
 | `node proxy-a.mjs usage <text>` | `{input_tokens, output_tokens}` parsed from a response body. |
 | `node proxy-a.mjs key <model> <body>` | The exact-match cache key (`sha256(model + "\n" + body)`). |
 
-The Homebrew/npm `on|off|stop|stats` control (via `cli.mjs`) is the cross-platform equivalent of
-`cachectl-a.sh` for installed users.
+The Homebrew/npm `llm-cache-proxy` CLI (via `cli.mjs`) is the cross-platform equivalent of
+`cachectl-a.sh` for installed users:
+
+| Command | What it does |
+|---|---|
+| `on` | Start with caching enabled. Prompts for the key on first run; writes `~/.llm-cache-a/.env`. |
+| `off` | Start in bypass mode. |
+| `restart` | Stop then start cleanly. |
+| `stop` | Stop the proxy. |
+| `stats` | Print live tokens/dollars saved. |
+| `setup` | (Re-)run the key + settings wizard. |
+| `validate` | Check config files + runtime health. Exits 0 all-pass, 1 on error. |
 
 ---
 
@@ -121,7 +135,7 @@ Pricing override: `~/.llm-cache-a/prices.json`, e.g. `{"haiku":[0.8e-6,4e-6]}` (
 | `GET /health` | `{"status":"ok"}` — always open (liveness), never requires the auth token. |
 | `GET /stats` | JSON: top-level = **all-time** counters, nested `.session` = **this run** (calls, hits, hit_rate, tokens/usd saved, savings %). |
 | `GET /metrics` | Prometheus exposition of the all-time counters. |
-| `GET /monitor` | Server-Sent-Events stream; one event per served call (`type`, `from_cache`, `stored`, `model`, tokens, `usd`). |
+| `GET /monitor` | Server-Sent-Events stream; one event per served call (`seq`, `type`, `from_cache`, `stored`, `model`, tokens, `usd`, `ms`, `snippet`). |
 
 When `CACHE_AUTH_TOKEN` is set, every endpoint except `/health` requires `x-cache-auth: <token>`.
 
@@ -153,12 +167,14 @@ linger). macOS: a launchd agent (`RunAtLoad` + restart-on-failure) that sources 
 
 | Path | What |
 |---|---|
-| `.env` | The real key + settings (gitignored, `chmod 600`). |
+| `<repo>/.env` | Key + settings for source installs (gitignored, `chmod 600`). |
+| `~/.llm-cache-a/.env` | Key + settings for Homebrew/npm installs (written by `setup` / first `on`). |
 | `~/.llm-cache-a/entries/` | Cache: one `.bin` (response) + one `.json` (meta) per entry. |
 | `~/.llm-cache-a/metrics.jsonl` | Append-only ledger; seeds the counters on boot. |
 | `~/.llm-cache-a/proxy.pid` | PID of the backgrounded proxy. |
 | `~/.llm-cache-a/proxy.log` | Default log file. |
-| `~/.llm-cache-a/prices.json` | Optional per-model pricing override. |
+| `~/.llm-cache-a/prices.json` | Optional per-model pricing override (`{"haiku":[0.8e-6,4e-6]}`). |
+| `~/.llm-cache-a/normalize.json` | Optional partial-cache config (system/message pattern stripping, suffix-key mode). |
 
 ---
 
