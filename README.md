@@ -96,10 +96,34 @@ CACHE_HOST=127.0.0.1
 To re-run setup or change the key: `llm-cache-proxy setup` (Homebrew/npm) or `./cachectl-a.sh setup` (source).
 
 **Full control surface:**
-- Homebrew/npm: `llm-cache-proxy on | off | stop | stats | setup`
-- Source: `./cachectl-a.sh on | off | stop | stats | status | monitor | explore | setup | run | install | uninstall`
+- Homebrew/npm: `llm-cache-proxy on | off | restart | stop | stats | setup | validate`
+- Source: `./cachectl-a.sh on | off | restart | stop | validate | stats | status | monitor | explore | setup | run | install | uninstall`
 
-(`off` = bypass: forwards everything, caches nothing.)
+(`off` = bypass: forwards everything, caches nothing. `restart` = stop then start. `validate` = check config files for errors and run liveness checks if the proxy is up.)
+
+**`validate` — config + runtime health check:**
+
+```
+$ llm-cache-proxy validate
+
+== llm-cache-proxy validate ==
+
+Config:
+  ✓ ANTHROPIC_API_KEY_REAL — set (sk-ant-api03-****)
+  ✓ CACHE_PORT=4000
+  ✓ CACHE_HOST=127.0.0.1
+  ✓ normalize.json — valid JSON (2 system_strip, 1 message_strip pattern(s); suffix_only=false)
+  ✓ prices.json — not present (built-in haiku/sonnet/opus prices used)
+
+Runtime (proxy at :4000):
+  ✓ /health → 200
+  ✓ /stats  → 200 (42 calls, 38 hits, 90.5% hit rate, cache on)
+  ✓ /metrics → 200 (Prometheus format, expected metrics present)
+
+Result: all checks passed ✓
+```
+
+Exits 0 on all-pass, 1 if any error — safe to use in CI or boot scripts.
 
 `npm test` runs the **zero-dep unit suite** (43 tests) against a mock upstream (no network, no key, 100% line/function
 coverage of `proxy-a.mjs`); `npm run test:fidelity` runs the **live, paid** byte-exact proof. `bench.py` needs

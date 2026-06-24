@@ -131,12 +131,156 @@ _uninstall() {
   fi
 }
 
+# Validate config files for syntax + run quick liveness checks if the proxy is up.
+_validate() {
+  local errors=0 warns=0
+  echo "== llm-cache-proxy validate =="
+  echo ""
+  echo "Config:"
+
+  # .env
+  local env_path="$REPO/.env"
+  [ -f "$env_path" ] && echo "  env file: $env_path" || echo "  env file: (not found at $env_path)"
+
+  if [ -z "${ANTHROPIC_API_KEY_REAL:-}" ]; then
+    echo "  ✗ ANTHROPIC_API_KEY_REAL — not set (run: $0 setup)"
+    errors=$((errors+1))
+  else
+    case "${ANTHROPIC_API_KEY_REAL}" in
+      sk-ant-*) echo "  ✓ ANTHROPIC_API_KEY_REAL — set (${ANTHROPIC_API_KEY_REAL:0:14}****)" ;;
+      *)        echo "  ! ANTHROPIC_API_KEY_REAL — set but doesn't start with sk-ant-..."
+                warns=$((warns+1)) ;;
+    esac
+  fi
+
+  local cache_port="${CACHE_PORT:-4000}"
+  case "$cache_port" in
+    ''|*[!0-9]*) echo "  ✗ CACHE_PORT=$cache_port — not a number" ; errors=$((errors+1)) ;;
+    *) if [ "$cache_port" -ge 1 ] 2>/dev/null && [ "$cache_port" -le 65535 ] 2>/dev/null; then
+         echo "  ✓ CACHE_PORT=$cache_port"
+       else
+         echo "  ✗ CACHE_PORT=$cache_port — out of range (1-65535)" ; errors=$((errors+1))
+       fi ;;
+  esac
+
+  echo "  ✓ CACHE_HOST=${CACHE_HOST:-127.0.0.1}"
+  [ -n "${CACHE_AUTH_TOKEN:-}" ] && echo "  ✓ CACHE_AUTH_TOKEN — set (token-gated exposure enabled)"
+
+  # normalize.json
+  local NORM="$HOME/.llm-cache-a/normalize.json"
+  if [ -f "$NORM" ]; then
+    local norm_err
+    norm_err=$("$NODE_BIN" -e "
+      try {
+        const raw = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
+        for (const f of ['system_strip','message_strip']) {
+          const a = raw[f];
+          if (a !== undefined && !Array.isArray(a)) throw new Error(f + ' must be an array');
+          if (Array.isArray(a)) a.forEach(p => {
+            try { new RegExp(p, 'gs'); }
+            catch(e) { throw new Error('invalid regex in ' + f + ': ' + JSON.stringify(p)); }
+          });
+        }
+        if (raw.suffix_turns !== undefined && (typeof raw.suffix_turns !== 'number' || raw.suffix_turns < 1))
+          throw new Error('suffix_turns must be a positive number');
+        const sc=(raw.system_strip||[]).length, mc=(raw.message_strip||[]).length;
+        process.stdout.write('valid JSON (' + sc + ' system_strip, ' + mc + ' message_strip pattern(s); suffix_only=' + !!raw.suffix_only + ')');
+      } catch(e) { process.stderr.write(e.message); process.exit(1); }
+    " "$NORM" 2>/tmp/llm_validate_err)
+    if [ $? -eq 0 ]; then
+      echo "  ✓ normalize.json — $norm_err"
+    else
+      echo "  ✗ normalize.json — $(cat /tmp/llm_validate_err 2>/dev/null)"
+      errors=$((errors+1))
+    fi
+    rm -f /tmp/llm_validate_err
+  else
+    echo "  ✓ normalize.json — not present (partial caching disabled)"
+  fi
+
+  # prices.json
+  local PRICES="$HOME/.llm-cache-a/prices.json"
+  if [ -f "$PRICES" ]; then
+    local prices_out prices_err
+    prices_out=$("$NODE_BIN" -e "
+      try {
+        const raw = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
+        if (typeof raw !== 'object' || Array.isArray(raw)) throw new Error('must be a JSON object');
+        for (const [k,v] of Object.entries(raw)) {
+          if (!Array.isArray(v)||v.length!==2||v.some(n=>typeof n!=='number'))
+            throw new Error('\"' + k + '\" must be [inputPricePerToken, outputPricePerToken]');
+        }
+        process.stdout.write('valid JSON (' + Object.keys(raw).length + ' model override(s))');
+      } catch(e) { process.stderr.write(e.message); process.exit(1); }
+    " "$PRICES" 2>/tmp/llm_validate_err)
+    if [ $? -eq 0 ]; then
+      echo "  ✓ prices.json — $prices_out"
+    else
+      echo "  ✗ prices.json — $(cat /tmp/llm_validate_err 2>/dev/null)"
+      errors=$((errors+1))
+    fi
+    rm -f /tmp/llm_validate_err
+  else
+    echo "  ✓ prices.json — not present (built-in haiku/sonnet/opus prices used)"
+  fi
+
+  # Runtime checks
+  echo ""
+  echo "Runtime (proxy at :${PORT}):"
+  local health_code
+  health_code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${PORT}/health" 2>/dev/null || echo "000")
+  case "$health_code" in
+    200)
+      echo "  ✓ GET /health → 200"
+
+      local stats_body stats_code stats_summary
+      stats_body=$(curl -s -w "\n__STATUS__%{http_code}" ${AUTH_HDR[@]+"${AUTH_HDR[@]}"} "http://localhost:${PORT}/stats" 2>/dev/null || echo "")
+      stats_code=$(printf '%s' "$stats_body" | grep -o '__STATUS__[0-9]*' | grep -o '[0-9]*')
+      if [ "$stats_code" = "200" ]; then
+        stats_summary=$(printf '%s' "$stats_body" | grep -v '__STATUS__' | "$NODE_BIN" -e '
+          let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
+            try { const j=JSON.parse(s); process.stdout.write(j.calls+" calls, "+j.hits+" hits, "+j.hit_rate_pct+"% hit rate, cache "+j.cache); }
+            catch { process.stdout.write("(parse error)"); }
+          });
+        ' 2>/dev/null || echo "(parse error)")
+        echo "  ✓ GET /stats → 200 ($stats_summary)"
+      else
+        echo "  ✗ GET /stats → ${stats_code:-no response}"
+        errors=$((errors+1))
+      fi
+
+      local metrics_code
+      metrics_code=$(curl -s -o /dev/null -w "%{http_code}" ${AUTH_HDR[@]+"${AUTH_HDR[@]}"} "http://localhost:${PORT}/metrics" 2>/dev/null || echo "000")
+      if [ "$metrics_code" = "200" ]; then
+        echo "  ✓ GET /metrics → 200 (Prometheus format)"
+      else
+        echo "  ✗ GET /metrics → ${metrics_code:-no response}"
+        errors=$((errors+1))
+      fi ;;
+    000)
+      echo "  - proxy not running (skipping runtime checks)" ;;
+    *)
+      echo "  ✗ GET /health → $health_code"
+      errors=$((errors+1)) ;;
+  esac
+
+  echo ""
+  if [ "$errors" -eq 0 ] && [ "$warns" -eq 0 ]; then
+    echo "Result: all checks passed ✓"
+  elif [ "$errors" -eq 0 ]; then
+    echo "Result: $warns warning(s) — review above"
+  else
+    echo "Result: $errors error(s), $warns warning(s)"
+  fi
+  [ "$errors" -eq 0 ]
+}
+
 # Show the full usage guide (USAGE.md), paged on a TTY; fall back to a one-liner if it's missing.
 _usage() {
   if [ -f "$REPO/USAGE.md" ]; then
     if [ -t 1 ] && command -v less >/dev/null 2>&1; then less -R "$REPO/USAGE.md"; else cat "$REPO/USAGE.md"; fi
   else
-    echo "usage: $0 {on|off|stop|stats|status|monitor|explore|setup|run|install|uninstall}" >&2
+    echo "usage: $0 {on|off|restart|stop|validate|stats|status|monitor|explore|setup|run|install|uninstall}" >&2
     echo "  (full guide USAGE.md not found next to the script)" >&2
   fi
 }
@@ -168,8 +312,10 @@ _start() {
 
 case "${1:-}" in
   help|-h|--help|'-?') _usage; exit 0 ;;
-  on)   _start ON "0" ;;
-  off)  _start OFF "1" ;;     # bypass: forwards everything, caches nothing
+  on)      _start ON "0" ;;
+  off)     _start OFF "1" ;;     # bypass: forwards everything, caches nothing
+  restart) _stop; _start ON "0" ;;
+  validate) _validate ;;
   stop)
     # Also unload the launchd agent so it doesn't restart after kill (use 'install' to re-enable at boot).
     PL="$HOME/Library/LaunchAgents/com.llm-cache-proxy.plist"
