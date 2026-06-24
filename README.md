@@ -145,22 +145,37 @@ Exact HIT → replay stored bytes, zero upstream call. MISS → forward with the
 
 ## Partial caching (optional)
 
-Create `~/.llm-cache-a/normalize.json` to enable normalized and suffix matching:
+Create `~/.llm-cache-a/normalize.json` to enable normalized matching. A recommended starting point is included as `normalize.json.example` — copy and edit:
+
+```bash
+cp normalize.json.example ~/.llm-cache-a/normalize.json
+./cachectl-a.sh validate   # confirm patterns compile
+./cachectl-a.sh restart
+```
+
+The example covers the most common dynamic fields in Claude Code system prompts:
 
 ```json
 {
-  "system_strip":  ["Current date[^\\n]*", "Session-ID: [a-f0-9-]+"],
+  "system_strip":  ["Current date[^\\n]*", "Today(?:'s date| is)[^\\n]*",
+                    "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-...-[0-9a-fA-F]{12}",
+                    "Session[- ]?[Ii][Dd][:\\s]+[A-Za-z0-9_=-]+"],
   "message_strip": ["<tool_result>[\\s\\S]*?</tool_result>"],
   "suffix_only":   false,
   "suffix_turns":  3
 }
 ```
 
-- **`system_strip`** — regex patterns stripped from the system prompt before hashing. Use for timestamps, dates, session IDs, or any field that changes run-to-run but doesn't affect the response.
-- **`message_strip`** — same, applied to message content. Use for `<tool_result>` blocks that carry dynamic values (file listings, timestamps, prices).
-- **`suffix_only: true`** — also tries a key built from only the last `suffix_turns` messages. Hits when a new conversation shares the same recent context with an earlier one. **Risk:** ignores older history, so a "same last 2 messages" hit in a different logical context replays a response that may not be appropriate. Only enable for idempotent, context-independent queries.
+- **`system_strip`** — regex patterns stripped from the system prompt before hashing. The example strips current date, "Today's date/Today is" phrases, UUIDs, and Session-ID lines — all fields that vary run-to-run without affecting what a correct response looks like.
+- **`message_strip`** — same, applied to message string content. The example strips `<tool_result>` blocks whose values change (file timestamps, live data) while keeping the surrounding question stable.
+- **`suffix_only: true`** — also keys on only the last `suffix_turns` messages (ignores older history). **Risk:** a different earlier conversation with the same last N messages could serve a cached response that's out of context. Leave `false` unless you have a specific scripted-session use case.
 
-What partial caching does **not** solve: truly interactive sessions where every turn is unique. If the last N messages are always different, no tier hits. The tier-1 exact cache remains the safe, high-confidence path; tiers 2–3 trade some replay confidence for higher hit rates on structured, partially-dynamic workloads.
+What partial caching does **not** solve: sessions where every turn has genuinely unique message content. The tier-1 exact cache is always tried first and is the safe, high-confidence path.
+
+Verify the example patterns work against a mock upstream (no key needed):
+```bash
+node test-normalize-example.mjs   # 12 tests: date, UUID, session-ID, tool_result, fidelity
+```
 
 ## Logging & monitoring
 

@@ -1,6 +1,6 @@
 {
   "name": "llm-cache-proxy",
-  "version": "2.0.5",
+  "version": "2.0.6",
   "files": [
     "proxy-a.mjs",
     "cachectl-a.sh",
@@ -8,6 +8,8 @@
     "cli.mjs",
     "bench.py",
     "test-fidelity.mjs",
+    "test-normalize-example.mjs",
+    "normalize.json.example",
     "docs/",
     "USAGE.md",
     "README.md",
@@ -30,7 +32,8 @@
     "explore": "./cachectl-a.sh explore",
     "check": "node --check proxy-a.mjs && node --check cli.mjs && node --check cache-explorer.mjs && node --check test-fidelity.mjs",
     "test": "node --test --experimental-test-coverage --test-coverage-include=proxy-a.mjs --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=99 'proxy*.test.mjs'",
-    "test:fidelity": "node test-fidelity.mjs"
+    "test:fidelity": "node test-fidelity.mjs",
+    "test:normalize-example": "node test-normalize-example.mjs"
   },
   "engines": {
     "node": ">=18"

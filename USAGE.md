@@ -133,7 +133,34 @@ By default the proxy uses an **exact-match** cache key: any difference in the re
 
 **File location:** `~/.llm-cache-a/normalize.json`
 
-The file is read once at proxy start. After editing it, restart the proxy (`./cachectl-a.sh restart`) for changes to take effect. Run `./cachectl-a.sh validate` to check for JSON or regex errors before restarting.
+**Quickstart — use the included example (recommended starting point):**
+
+```bash
+# Source install
+cp normalize.json.example ~/.llm-cache-a/normalize.json
+
+# Homebrew / npm (find the installed path)
+cp "$(dirname $(which llm-cache-proxy))/../libexec/normalize.json.example" ~/.llm-cache-a/normalize.json
+# or: npx --yes llm-cache-proxy -- cat normalize.json.example > ~/.llm-cache-a/normalize.json
+
+./cachectl-a.sh validate   # check patterns compile (exits 1 on error)
+./cachectl-a.sh restart    # pick up the new file
+
+# Verify against mock upstream (no key needed):
+node test-normalize-example.mjs    # 12 tests covering all example patterns
+```
+
+The file is read once at proxy start. After editing, always run `validate` before `restart` to catch regex errors early.
+
+**What the example file covers:**
+
+| Pattern | Strips from | Effect |
+|---|---|---|
+| `Current date[^\n]*` | system prompt | date line e.g. "Current date: 2026-06-24" |
+| `Today(?:'s date\| is)[^\n]*` | system prompt | "Today's date: ..." or "Today is Monday..." |
+| UUID (`[0-9a-fA-F]{8}-...`) | system prompt | session/context UUIDs |
+| `Session[- ]?ID:...` | system prompt | session ID labels |
+| `<tool_result>...</tool_result>` | message content | tool result blocks with volatile data |
 
 ### Schema
 
@@ -226,6 +253,16 @@ On a MISS, the proxy stores the response under the **exact key** and also writes
 ```
 
 The `validate` command tests every regex with `new RegExp(pattern, 'gs')` and reports any that throw. Fix them before restarting.
+
+To verify the **example file** patterns specifically work end-to-end (no real API key needed):
+
+```bash
+node test-normalize-example.mjs
+```
+
+This runs 12 mock-upstream tests covering every pattern in `normalize.json.example`:
+date lines, UUID, Session-ID, `<tool_result>` strips, no-interference with non-matching content,
+combined Claude Code style prompts, array block message content, and byte-exact replay fidelity.
 
 ---
 
