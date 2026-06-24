@@ -34,12 +34,13 @@ const listen = (srv, port = 0) =>
 // Boot one isolated proxy + mock upstream. Call once per test file; swap the
 // mock's behavior between tests with setResponder(). env/seed* must be applied
 // before the dynamic import because proxy-a.mjs reads them at module top-level.
-export async function boot({ responder = jsonResponder, env = {}, quiet = true, seedMetrics, seedPrices } = {}) {
+export async function boot({ responder = jsonResponder, env = {}, quiet = true, seedMetrics, seedPrices, seedNormalize } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'lcp-'));
   const dir = path.join(home, '.llm-cache-a');
   fs.mkdirSync(dir, { recursive: true });
-  if (seedMetrics !== undefined) fs.writeFileSync(path.join(dir, 'metrics.jsonl'), seedMetrics);
-  if (seedPrices !== undefined) fs.writeFileSync(path.join(dir, 'prices.json'), JSON.stringify(seedPrices));
+  if (seedMetrics  !== undefined) fs.writeFileSync(path.join(dir, 'metrics.jsonl'),  seedMetrics);
+  if (seedPrices   !== undefined) fs.writeFileSync(path.join(dir, 'prices.json'),    JSON.stringify(seedPrices));
+  if (seedNormalize !== undefined) fs.writeFileSync(path.join(dir, 'normalize.json'), JSON.stringify(seedNormalize));
 
   const state = { count: 0, responder };
   const mock = mockUpstream(state);

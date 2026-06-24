@@ -2,7 +2,7 @@
 
 This review evaluates **llm-cache-proxy**, a zero-dependency local caching proxy for the Anthropic Messages API. It is written for an engineer deciding whether to adopt the tool, extend it, or trust it on live agent traffic. It covers design, the implementation in `proxy-a.mjs`, the measured benchmark, observability, security posture, and the boundaries of where the tool earns its keep. It is not a usage guide (the README covers that) or a security audit.
 
-_Updated 2026-06-24 (v2.0.2): logging & monitoring (PR #2), concurrency hardening + a streaming/tool_use fidelity proof (PR #3), npm/CLI install packaging (PR #5), then a major feature pass (PR #6) shipped as **v2.0.0** (PR #8) — refactored the proxy into an importable, **100%-unit-tested** module with loopback-default bind + token auth, log verbosity, a realtime `/monitor` SSE stream, this-session vs all-time stats, a first-run setup wizard, boot-service install (systemd/launchd), a cache-explorer TUI, and a CLI for the core routines; installs via npm (`npm i -g llm-cache-proxy`) or Homebrew (`brew tap mithudso/tap`). **v2.0.1** (PRs #10–12) added a USAGE.md quick-reference guide (surfaced by `cachectl-a.sh -h/--help`), fixed a macOS bash 3.2 crash in `cachectl-a.sh` when `CACHE_AUTH_TOKEN` is unset (`AUTH_HDR[@]: unbound variable` under `set -u`), and formally deleted the deprecated LiteLLM stack files (cachectl.sh, callback.py, config.yaml, requirements.txt), leaving only the decision record in docs/ARCHITECTURE.md. **v2.0.2** (PR #13) fixed three launchd reliability bugs surfaced by a real system reboot: `_stop()` now unloads the plist before killing (eliminating the `EADDRINUSE` race from `KeepAlive` restarting too fast), `status` falls back to `pgrep` and auto-heals the pidfile when launchd restarts give the process a new PID, and the plist writes `$$` before `exec node` so the pidfile stays correct across reboots; also added a monotonic `seq` call counter and 80-char response `snippet` to every `/monitor` broadcast. The live fidelity proof was re-run against the real API (23/23) to confirm no behavior drift. Code references use function names, since line numbers move across rewrites._
+_Updated 2026-06-24 (v2.0.2): logging & monitoring (PR #2), concurrency hardening + a streaming/tool_use fidelity proof (PR #3), npm/CLI install packaging (PR #5), then a major feature pass (PR #6) shipped as **v2.0.0** (PR #8) — refactored the proxy into an importable, **100%-unit-tested** module with loopback-default bind + token auth, log verbosity, a realtime `/monitor` SSE stream, this-session vs all-time stats, a first-run setup wizard, boot-service install (systemd/launchd), a cache-explorer TUI, and a CLI for the core routines; installs via npm (`npm i -g llm-cache-proxy`) or Homebrew (`brew tap mithudso/tap`). **v2.0.1** (PRs #10–12) added a USAGE.md quick-reference guide (surfaced by `cachectl-a.sh -h/--help`), fixed a macOS bash 3.2 crash in `cachectl-a.sh` when `CACHE_AUTH_TOKEN` is unset (`AUTH_HDR[@]: unbound variable` under `set -u`), and formally deleted the deprecated LiteLLM stack files (cachectl.sh, callback.py, config.yaml, requirements.txt), leaving only the decision record in docs/ARCHITECTURE.md. **v2.0.2** (PR #13) fixed three launchd reliability bugs surfaced by a real system reboot: `_stop()` now unloads the plist before killing (eliminating the `EADDRINUSE` race from `KeepAlive` restarting too fast), `status` falls back to `pgrep` and auto-heals the pidfile when launchd restarts give the process a new PID, and the plist writes `$$` before `exec node` so the pidfile stays correct across reboots; also added a monotonic `seq` call counter and 80-char response `snippet` to every `/monitor` broadcast. The live fidelity proof was re-run against the real API (23/23) to confirm no behavior drift. **v2.0.3** (PR #15) adds optional partial caching: a `normalizeBody()` function strips configurable regex patterns from the system prompt and message content before hashing, producing a normalized key (tier 2, `HIT-NORM`); with `suffix_only: true`, a third key tier (`HIT-SUFFIX`) is built from only the last N messages, ignoring conversation history. Both tiers write alias files on MISS so future normalized-equivalent requests hit. The test suite grew from 29 to 43 tests across three new files (proxy-normalize, proxy-normalize-defaults, proxy-suffix). Code references use function names, since line numbers move across rewrites._
 
 ## Verdict
 
@@ -18,7 +18,15 @@ The design is honest about the catch. The win equals the full-call repeat rate. 
 
 ## Architecture and design
 
-The shape is correct for the problem. One Node process sits in front of `api.anthropic.com`. Claude Code points `ANTHROPIC_BASE_URL` at it. The cache key is `sha256(model + raw request body)`: exact match only, no semantic or fuzzy matching, which keeps replay deterministic and removes a whole class of "close but wrong" failures.
+The shape is correct for the problem. One Node process sits in front of `api.anthropic.com`. Claude Code points `ANTHROPIC_BASE_URL` at it. Cache lookup now uses three key tiers attempted in order:
+
+| Tier | Key | Label | Active when |
+|---|---|---|---|
+| 1 — exact | `sha256(model + raw body)` | `HIT` | always |
+| 2 — normalized | `sha256(model + normalize(body))` | `HIT-NORM` | `normalize.json` present |
+| 3 — suffix | `sha256(model + system_norm + messages[-N:])` | `HIT-SUFFIX` | `suffix_only: true` |
+
+Tier 1 is exact match: no semantic or fuzzy matching, deterministic replay, no "close but wrong" failures. Tiers 2–3 trade some replay confidence for higher hit rates on structured, partially-dynamic workloads. A MISS writes cache files under all active alias keys so subsequent requests at tiers 2–3 can hit without a second upstream call.
 
 Two decisions stand out as good engineering:
 
@@ -31,7 +39,7 @@ The latest refactor made the module **importable without side effects**: `start`
 
 ## Implementation review
 
-The code is clean, flat, and auditable: about 400 lines (the bind/auth gate, verbosity, default log file, the `/monitor` broadcaster, session-vs-all-time stats, the CLI dispatch, and inline docs all landed with v2.0.0; v2.0.2 added a monotonic call counter and response-snippet extraction behind `node:coverage` guards), still no dependencies beyond Node built-ins. The control surface (`cachectl-a.sh`), the cache explorer (`cache-explorer.mjs`), the benchmark (`bench.py`), the fidelity test (`test-fidelity.mjs`), and the new USAGE.md quick-reference guide are equally direct.
+The code is clean, flat, and auditable: about 450 lines (the bind/auth gate, verbosity, default log file, the `/monitor` broadcaster, session-vs-all-time stats, the CLI dispatch, and inline docs all landed with v2.0.0; v2.0.3 added `normalizeBody()`, alias-key computation in `handle()`, and alias writes in `fetchUpstream()` via a new trailing `aliasKeys` parameter), still no dependencies beyond Node built-ins. The control surface (`cachectl-a.sh`), the cache explorer (`cache-explorer.mjs`), the benchmark (`bench.py`), the fidelity test (`test-fidelity.mjs`), and the new USAGE.md quick-reference guide are equally direct.
 
 Strengths worth naming:
 
@@ -45,6 +53,7 @@ Strengths worth naming:
 - **Operability.** A first-run `setup` wizard writes a chmod-600 `.env`; `install`/`uninstall` register a boot service with restart-on-failure (systemd user unit on Linux, launchd agent on macOS); a `cache-explorer.mjs` TUI browses and invalidates entries (with scriptable `--list`/`--json`/`--view`/`--invalidate`). On macOS, three launchd reliability bugs were found on a real system reboot and fixed in v2.0.2: the `EADDRINUSE` race (`KeepAlive` restarting before the port freed), stale pidfile after reboot (launchd assigns a new PID that the file doesn't reflect), and `stop` failing to prevent an immediate launchd restart.
 - **Callable/testable routines.** `node proxy-a.mjs stats|price|usage|key` runs the core functions from the shell; the same functions are exported for import.
 - **Clear guardrails.** A global bypass (`CACHE_OFF`) and a per-request `x-cache-bypass` header, a 7-day TTL, and a throttled LRU prune.
+- **Optional partial caching.** `normalizeBody()` strips configurable regex patterns from system prompt and message content, producing a normalized key (tier 2). With `suffix_only: true`, a tier-3 key uses only the last N messages, enabling hits across sessions that share a recent context. Both tiers are disabled by default (no `normalize.json`); tier 3 is gated behind an explicit flag because ignoring conversation history risks replaying a response out of context. Alias files written on MISS keep the fast path intact: tier-1 hits are unaffected, and tiers 2–3 add at most two extra `readFile` calls on tier-1 miss before falling through to upstream.
 
 Gaps, by severity. The two Majors and three concurrency Minors from earlier drafts are resolved, and the earlier auth/exposure recommendation is now addressed by the loopback-default + token gate. What remains are two nits that do not affect correctness:
 
@@ -57,7 +66,7 @@ Neither nit matters for the single-user target.
 
 ## Testing
 
-Two layers, deliberately separated by cost. **`npm test`** is a zero-dependency `node:test` suite that drives the *real* proxy code against a local HTTP mock upstream (via the `CACHE_UPSTREAM_*` hooks) — no network, no key, no spend — and is gated at **100% line and 100% function coverage** of `proxy-a.mjs` (branch ≥99%; V8 block coverage is 100%, with only defensive I/O-error swallows and the entrypoint excluded via `node:coverage` comments). It exercises hit/miss/coalesce/bypass/expired/prune/seed/error/client-abort, **byte-exact multi-chunk SSE replay** (deliberately split mid-token so a concatenation bug would fail it), auth enforcement, the bind refusal, verbosity + the file sink, the `/monitor` stream, and session-vs-all-time accounting. The suite splits scenarios across files so coverage merges across child processes.
+Two layers, deliberately separated by cost. **`npm test`** is a zero-dependency `node:test` suite (**43 tests** across 12 files) that drives the *real* proxy code against a local HTTP mock upstream (via the `CACHE_UPSTREAM_*` hooks) — no network, no key, no spend — and is gated at **100% line and 100% function coverage** of `proxy-a.mjs` (branch ≥99%; V8 block coverage is 100%, with only defensive I/O-error swallows and the entrypoint excluded via `node:coverage` comments). It exercises hit/miss/coalesce/bypass/expired/prune/seed/error/client-abort, **byte-exact multi-chunk SSE replay** (deliberately split mid-token so a concatenation bug would fail it), auth enforcement, the bind refusal, verbosity + the file sink, the `/monitor` stream, session-vs-all-time accounting, and (via three new test files) all branches of the normalized and suffix key tiers — including HIT-NORM, HIT-SUFFIX, the alias-write path, and the dedup guards. The suite splits scenarios across files so coverage merges across child processes.
 
 **`npm run test:fidelity`** is the live, **paid** counterpart: `test-fidelity.mjs` proves byte-identical cold→warm replay against the real API for streaming, tool_use, and streaming+tool_use, plus coalescing — **23/23**, re-run after the refactor to confirm no behavior drift. Keeping the free suite as the default `npm test` makes the project CI-friendly while preserving the live proof as an opt-in.
 
@@ -78,7 +87,7 @@ Read it correctly: savings track the repeat rate, and the 80% here is simply (N�
 
 A real `claude -p` session was run twice through the proxy with an identical prompt. Both runs returned the correct answer with streaming intact and zero proxy errors, so the proxy is transparent to a live Claude Code agent loop. Both responses were stored (complete 200s), yet the second run was a MISS, not a hit. Claude Code's request bodies are not byte-identical across runs (dynamic system prompt and context), so the two turns hashed to different keys.
 
-That sharpens the tool's scope. Exact-match caching hits deterministic, byte-identical repeats: eval suites, CI, scripted SDK calls, the fidelity test. It does not hit interactive or agent sessions, where each turn's context differs. This matches the design's stated scope; the live test makes the boundary concrete and the README states it plainly so users do not expect savings from live sessions.
+That sharpens the tool's scope. Exact-match (tier-1) caching hits deterministic, byte-identical repeats: eval suites, CI, scripted SDK calls, the fidelity test. It does not hit interactive or agent sessions, where each turn's context differs. The optional partial-cache tiers (v2.0.3) close part of this gap: tier-2 (`HIT-NORM`) handles the common case where only the system prompt's timestamp or session ID varies across runs of the same logical task; tier-3 (`HIT-SUFFIX`) handles different conversation prefixes with a shared recent context. Neither tier helps when every turn is genuinely novel — the boundary is honest and the README states it plainly.
 
 ## Security posture
 
@@ -119,8 +128,8 @@ In priority order:
 
 | Dimension | Rating | Note |
 |---|---|---|
-| Fit for stated purpose | Excellent | Exact-match rerun/eval/CI caching, done right |
-| Code clarity | Excellent | ~440 lines, zero deps, readable in one sitting; heavily commented |
+| Fit for stated purpose | Excellent | Exact-match rerun/eval/CI caching + optional partial cache (HIT-NORM/HIT-SUFFIX) |
+| Code clarity | Excellent | ~450 lines, zero deps, readable in one sitting; heavily commented |
 | Correctness (non-streaming) | Strong | Complete-200-only, fail-open, byte-exact |
 | Correctness (streaming/tool_use) | Proven | Byte-exact replay verified live (23/23) + multi-chunk SSE covered in the unit suite |
 | Robustness under concurrency | Strong | Async I/O, coalescing (1 upstream call per burst, proven), abort guard, throttled prune |
@@ -143,10 +152,10 @@ export ANTHROPIC_API_KEY=anything                           # client key ignored
 ```
 
 Operate: `./cachectl-a.sh on | off | stop | stats | status | monitor | explore | setup | run | install | uninstall`
-(`off` = bypass). Verify with `npm test` (zero-dep unit suite, 100% line/function coverage, no paid calls)
+(`off` = bypass). Verify with `npm test` (zero-dep unit suite, 43 tests, 100% line/function coverage, no paid calls)
 and `npm run test:fidelity` (live paid proof, expects 23/23); inspect with `curl localhost:4000/stats`
 (this-session + all-time) and `./cachectl-a.sh monitor` (realtime). Configuration is via env vars
 (`CACHE_PORT`, `CACHE_HOST`, `CACHE_AUTH_TOKEN`, `CACHE_TTL_SEC`, `CACHE_MAX_ENTRIES`, `CACHE_LOG_LEVEL`,
-`CACHE_LOG_FILE`, `CACHE_OFF`) and `~/.llm-cache-a/prices.json` for per-model pricing; data lives under `~/.llm-cache-a/`.
+`CACHE_LOG_FILE`, `CACHE_OFF`) and `~/.llm-cache-a/prices.json` for per-model pricing, `~/.llm-cache-a/normalize.json` for partial-cache patterns; data lives under `~/.llm-cache-a/`.
 
-**Bottom line.** A sharp, well-scoped utility that does the hard part (faithful replay) correctly and provably, tracks its own token and dollar savings, and tells the truth about its limits. The byte-exact core is now wrapped in a 100%-covered unit suite and a matured operational surface (token-gated network exposure, realtime monitor, boot-service install, cache explorer) without losing the zero-dependency, read-in-one-sitting character. Ship it for batch and rerun workloads. The live agent loop confirms end-to-end transparency; just do not expect interactive sessions to cache, since their request bodies vary run to run.
+**Bottom line.** A sharp, well-scoped utility that does the hard part (faithful replay) correctly and provably, tracks its own token and dollar savings, and tells the truth about its limits. The byte-exact core is now wrapped in a 100%-covered unit suite and a matured operational surface (token-gated network exposure, realtime monitor, boot-service install, cache explorer) without losing the zero-dependency, read-in-one-sitting character. Optional partial caching extends the hit surface to "same logical prompt, different timestamp" workloads without touching the exact-match fast path. Ship it for batch and rerun workloads. For interactive sessions: tier-1 still won't help, but tier-2 with a well-tuned normalize.json will recover hits that were previously lost to dynamic system-prompt fields.
