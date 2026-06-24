@@ -143,30 +143,52 @@ In priority order:
 
 **Repository:** https://github.com/mithudso/llm-cache-proxy
 
-Single user, macOS or Linux. Needs **Node ≥ 18** to run the proxy (the unit suite needs **Node ≥ 22** for built-in coverage) and a real Anthropic key. Three install paths:
+Single user, macOS or Linux. Needs **Node ≥ 18** to run the proxy (the unit suite needs **Node ≥ 22** for built-in coverage) and a real Anthropic key.
+
+**Install:**
 
 ```bash
-# Homebrew (macOS / Linux) — recommended; no git clone needed
-brew install mithudso/tap/llm-cache-proxy
-
-# npm — global install or one-off via npx
-npm install -g llm-cache-proxy
-npx llm-cache-proxy <cmd>
-
-# From source
-git clone https://github.com/mithudso/llm-cache-proxy.git && cd llm-cache-proxy
+brew install mithudso/tap/llm-cache-proxy   # Homebrew (macOS / Linux) — recommended
+npm install -g llm-cache-proxy              # npm global  (or: npx llm-cache-proxy <cmd>)
+git clone https://github.com/mithudso/llm-cache-proxy.git && cd llm-cache-proxy  # source
 ```
 
-For Homebrew and npm installs, `llm-cache-proxy <cmd>` replaces `./cachectl-a.sh <cmd>`. First run:
+**First run — just call `on`; it prompts for the key and writes config immediately:**
 
 ```bash
-llm-cache-proxy setup   # or ./cachectl-a.sh setup — prompts for key + settings, writes .env (chmod 600)
-llm-cache-proxy on      # start on :4000 (<2s)
+llm-cache-proxy on      # Homebrew / npm
+./cachectl-a.sh on      # source install
+```
+
+No separate setup step required. The wizard runs automatically on the first invocation when the key is not yet set, then starts the proxy.
+
+**Config file paths (written by the setup wizard, chmod 600):**
+
+| Install | Config file |
+|---|---|
+| Homebrew / npm | `~/.llm-cache-a/.env` |
+| Source | `<repo-root>/.env` |
+
+**Config file contents (example):**
+
+```bash
+ANTHROPIC_API_KEY_REAL=sk-ant-api03-...   # real key — never committed
+CACHE_PORT=4000
+CACHE_TTL_SEC=604800                       # 7 days
+CACHE_MAX_ENTRIES=5000
+CACHE_HOST=127.0.0.1                       # loopback only; 0.0.0.0 requires CACHE_AUTH_TOKEN
+# CACHE_LOG_LEVEL=info                     # silent|error|info|debug
+# CACHE_LOG_FILE=/Users/you/.llm-cache-a/proxy.log   # or 'none'
+```
+
+To re-run setup or rotate the key: `llm-cache-proxy setup` (Homebrew/npm) or `./cachectl-a.sh setup` (source).
+
+```bash
 export ANTHROPIC_BASE_URL=http://localhost:4000   # point Claude Code / SDK at it
 export ANTHROPIC_API_KEY=anything                 # client key ignored; .env key is used
 ```
 
-Operate: `on | off | stop | stats | status | monitor | explore | setup | run | install | uninstall`
+Operate: `on | off | stop | stats | setup` (Homebrew/npm) · `on | off | stop | stats | status | monitor | explore | setup | run | install | uninstall` (source, via `./cachectl-a.sh`).
 (`off` = bypass). Verify with `npm test` (zero-dep unit suite, 43 tests, 100% line/function coverage, no paid calls)
 and `npm run test:fidelity` (live paid proof, expects 23/23); inspect with `curl localhost:4000/stats`
 (this-session + all-time) and `./cachectl-a.sh monitor` (realtime). Configuration is via env vars
