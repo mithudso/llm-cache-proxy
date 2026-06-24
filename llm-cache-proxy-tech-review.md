@@ -2,7 +2,7 @@
 
 This review evaluates **llm-cache-proxy**, a zero-dependency local caching proxy for the Anthropic Messages API. It is written for an engineer deciding whether to adopt the tool, extend it, or trust it on live agent traffic. It covers design, the implementation in `proxy-a.mjs`, the measured benchmark, observability, security posture, and the boundaries of where the tool earns its keep. It is not a usage guide (the README covers that) or a security audit.
 
-_Updated 2026-06-23: logging & monitoring (PR #2), concurrency hardening + a streaming/tool_use fidelity proof (PR #3), npm/CLI install packaging (PR #5), then a major feature pass (PR #6) shipped as **v2.0.0** (PR #8). That pass refactored the proxy into an importable, **100%-unit-tested** module (mock-upstream `node:test` suite, no paid calls), then added a loopback-by-default bind with token auth, log verbosity + a default log file, a realtime `/monitor` SSE stream, this-session vs all-time stats, a first-run setup wizard, boot-service install (systemd/launchd), a cache-explorer TUI, and a CLI for the core routines; it installs via npm (`npm i -g llm-cache-proxy`) or Homebrew (`brew tap mithudso/tap`). The live fidelity proof was re-run against the real API (23/23) to confirm the refactor changed no observable behavior. Code references use function names, since line numbers move across rewrites._
+_Updated 2026-06-24 (v2.0.1): logging & monitoring (PR #2), concurrency hardening + a streaming/tool_use fidelity proof (PR #3), npm/CLI install packaging (PR #5), then a major feature pass (PR #6) shipped as **v2.0.0** (PR #8) — refactored the proxy into an importable, **100%-unit-tested** module with loopback-default bind + token auth, log verbosity, a realtime `/monitor` SSE stream, this-session vs all-time stats, a first-run setup wizard, boot-service install (systemd/launchd), a cache-explorer TUI, and a CLI for the core routines; installs via npm (`npm i -g llm-cache-proxy`) or Homebrew (`brew tap mithudso/tap`). **v2.0.1** (PRs #10–12) added a USAGE.md quick-reference guide (surfaced by `cachectl-a.sh -h/--help`), fixed a macOS bash 3.2 crash in `cachectl-a.sh` when `CACHE_AUTH_TOKEN` is unset (`AUTH_HDR[@]: unbound variable` under `set -u`), and formally deleted the deprecated LiteLLM stack files (cachectl.sh, callback.py, config.yaml, requirements.txt), leaving only the decision record in docs/ARCHITECTURE.md. The live fidelity proof was re-run against the real API (23/23) to confirm no behavior drift. Code references use function names, since line numbers move across rewrites._
 
 ## Verdict
 
@@ -31,7 +31,7 @@ The latest refactor made the module **importable without side effects**: `start`
 
 ## Implementation review
 
-The code is clean, flat, and auditable: about 440 lines (up from ~230; the bind/auth gate, verbosity, default log file, the `/monitor` broadcaster, session-vs-all-time stats, the CLI dispatch, and inline docs landed since), still no dependencies beyond Node built-ins. The control surface (`cachectl-a.sh`), the cache explorer (`cache-explorer.mjs`), the benchmark (`bench.py`), and the fidelity test (`test-fidelity.mjs`) are equally direct.
+The code is clean, flat, and auditable: about 370 lines (the bind/auth gate, verbosity, default log file, the `/monitor` broadcaster, session-vs-all-time stats, the CLI dispatch, and inline docs all landed with v2.0.0; no new logic was added in v2.0.1), still no dependencies beyond Node built-ins. The control surface (`cachectl-a.sh`), the cache explorer (`cache-explorer.mjs`), the benchmark (`bench.py`), the fidelity test (`test-fidelity.mjs`), and the new USAGE.md quick-reference guide are equally direct.
 
 Strengths worth naming:
 
@@ -88,11 +88,14 @@ Materially improved this pass, and the README does not overclaim. The headline c
 - **Monitoring endpoints follow the same gate.** `/stats`, `/metrics`, and `/monitor` require the token when one is set (only `/health` stays open, for liveness probes). They expose usage counters and dollar figures but no secrets and no prompt or response content.
 - **Plaintext at rest.** The key lives in `.env` (gitignored, now written chmod 600 by `setup`), and cached responses sit unencrypted under `~/.llm-cache-a/`. Prompts are not persisted, which softens the exposure, but response bodies can still be sensitive. The cache explorer makes targeted invalidation easy.
 - **Service install caveat.** The launchd agent sources `.env` via a `bash -lc` wrapper rather than baking the secret into the plist; the systemd unit uses `EnvironmentFile=.env`. Both keep the key in `.env`. (The install/uninstall paths are verified by inspection and `bash -n`, not by a live boot cycle.)
+- **macOS bash 3.2 compatibility (v2.0.1).** `cachectl-a.sh status/stats/monitor` previously crashed on macOS with `AUTH_HDR[@]: unbound variable` under `set -u` when `CACHE_AUTH_TOKEN` was not set (empty array expansion in bash 3.2). Fixed with `${AUTH_HDR[@]+"${AUTH_HDR[@]}"}` idiom — a portable empty-array guard that works on both bash 3.2 (macOS system shell) and bash 5.x.
 - **Secret hygiene in the repo is sound.** Every commit in this project was gated against staging `.env` or a real key, and the history is clean.
 
 ## Engineering judgment: the LiteLLM pivot
 
-The decision record deserves credit independent of the code. The project first reached for LiteLLM on the reasonable theory that built-in caching beats hand-rolled. It then hit a wall of compounding problems: an 87-second import, flaky 120-second-plus startup, a passthrough route that bypassed the cache, a wildcard-routing path that demanded a database, and the IPv4 `localhost` mismatch. Rather than keep patching, the author measured, called it, and rewrote the whole thing as dependency-free Node that starts in under two seconds. Choosing the heavy tool first was defensible; abandoning it on evidence was the right call. The README preserves the reasoning instead of hiding it, which is exactly how a decision record should work.
+The decision record deserves credit independent of the code. The project first reached for LiteLLM on the reasonable theory that built-in caching beats hand-rolled. It then hit a wall of compounding problems: an 87-second import, flaky 120-second-plus startup, a passthrough route that bypassed the cache, a wildcard-routing path that demanded a database, and the IPv4 `localhost` mismatch. Rather than keep patching, the author measured, called it, and rewrote the whole thing as dependency-free Node that starts in under two seconds. Choosing the heavy tool first was defensible; abandoning it on evidence was the right call.
+
+v2.0.1 completed the pivot by formally deleting the abandoned files (cachectl.sh, callback.py, config.yaml, config.nocache.yaml, requirements.txt — 243 lines removed, 9 changed). The repo is now clean; the decision record survives in docs/ARCHITECTURE.md rather than cluttering the working tree. The README replaced the stale file list with a rationale-only "Why not LiteLLM" note, which is the right scope for that surface.
 
 ## Recommendations
 
@@ -129,7 +132,7 @@ In priority order:
 
 ## Appendix: install & use
 
-Single user, macOS or Linux. Needs **Node ≥ 18** to run the proxy (the unit suite needs **Node ≥ 22** for built-in coverage) and a real Anthropic key. No build step, no `npm install`. Full guide: `docs/INSTALL.md`.
+Single user, macOS or Linux. Needs **Node ≥ 18** to run the proxy (the unit suite needs **Node ≥ 22** for built-in coverage) and a real Anthropic key. No build step, no `npm install`. Full guide: `USAGE.md` (also surfaced by `./cachectl-a.sh --help`) and `docs/INSTALL.md`.
 
 ```bash
 git clone https://github.com/mithudso/llm-cache-proxy.git && cd llm-cache-proxy

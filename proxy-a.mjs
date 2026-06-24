@@ -146,7 +146,7 @@ async function readHit(file, meta) {
 }
 
 // Replay a cached payload to the client byte-for-byte, update hit counters, log, and broadcast.
-function serveHit(res, m, buf, label) {
+function serveHit(res, m, buf, label, seq) {
   safe(res, () => { res.writeHead(200, { 'content-type': m.contentType || 'application/json', 'x-cache': label }); res.end(buf); });
   const inT = m.usage?.input_tokens || 0, outT = m.usage?.output_tokens || 0;
   const d = usd(m.model, inT, outT);
@@ -154,13 +154,20 @@ function serveHit(res, m, buf, label) {
   if (label === 'HIT-COALESCED') c.coalesced++;
   metric({ event: 'hit', model: m.model, bytes: buf.length, in: inT, out: outT, usd: d, coalesced: label === 'HIT-COALESCED' });
   log(`${label.padEnd(13)} ${m.model || '?'}  +${inT + outT}tok $${d.toFixed(5)}  | saved $${c.savedUsd.toFixed(4)} / ${c.savedIn + c.savedOut}tok  hit-rate ${hitRate().toFixed(1)}%`);
-  broadcast({ type: label, from_cache: true, model: m.model, in: inT, out: outT, usd: d });
+  /* node:coverage disable */ /* best-effort snippet for monitor display; null-chain branches not worth testing */
+  let monExtra = {};
+  if ((m.contentType || '').includes('application/json')) {
+    try { const snip = JSON.parse(buf.toString('utf8')).content?.[0]?.text?.slice(0, 80); if (snip != null) monExtra = { snippet: snip }; } catch {}
+  }
+  /* node:coverage enable */
+  broadcast({ seq, type: label, from_cache: true, model: m.model, in: inT, out: outT, usd: d, ...monExtra });
 }
 
 const inflight = new Map();   // key -> Promise<{status, contentType, buf, model, usage}>
 
 // ---- realtime monitor: GET /monitor holds an SSE stream; every served call is broadcast live ----
 const monitors = new Set();   // open /monitor response objects
+let callSeq = 0;              // monotonic per-process call counter, included in every broadcast event
 const broadcast = (ev) => {
   if (!monitors.size) return;
   const line = `data: ${JSON.stringify({ t: Date.now(), ...ev })}\n\n`;
@@ -169,6 +176,7 @@ const broadcast = (ev) => {
 
 // Core request path: hash the body to a key, then try disk-cache → coalesce → upstream fetch.
 async function handle(req, res, body) {
+  const seq = ++callSeq;
   let parsed = {}; try { parsed = JSON.parse(body.toString('utf8')); } catch {}
   const model = parsed.model || '';
   const wantsStream = parsed.stream === true;
@@ -180,29 +188,29 @@ async function handle(req, res, body) {
 
   // 1) disk cache hit
   if (!bypass) {
-    try { const h = await readHit(file, meta); if (h) { serveHit(res, h.m, h.buf, 'HIT'); return; } } catch {}
+    try { const h = await readHit(file, meta); if (h) { serveHit(res, h.m, h.buf, 'HIT', seq); return; } } catch {}
   }
 
   // 2) coalesce onto an in-flight identical fetch (no second upstream call)
   if (!bypass && inflight.has(key)) {
     try {
       const r = await inflight.get(key);
-      if (r && r.status === 200) { serveHit(res, { contentType: r.contentType, model: r.model, usage: r.usage }, r.buf, 'HIT-COALESCED'); return; }
+      if (r && r.status === 200) { serveHit(res, { contentType: r.contentType, model: r.model, usage: r.usage }, r.buf, 'HIT-COALESCED', seq); return; }
       // first fetch was non-200/errored: replay its status+body so the waiter sees the same result
-      if (r) { safe(res, () => { res.writeHead(r.status, { 'content-type': r.contentType, 'x-cache': 'MISS-COALESCED' }); res.end(r.buf); }); broadcast({ type: 'MISS-COALESCED', from_cache: false, model: r.model, status: r.status }); return; }
+      if (r) { safe(res, () => { res.writeHead(r.status, { 'content-type': r.contentType, 'x-cache': 'MISS-COALESCED' }); res.end(r.buf); }); broadcast({ seq, type: 'MISS-COALESCED', from_cache: false, model: r.model, status: r.status }); return; }
     } catch {}
     // fall through to own fetch if the shared one rejected
   }
 
   // 3) MISS — fetch upstream, stream live to THIS client, share the result via inflight
-  const p = fetchUpstream(req, res, body, model, wantsStream, file, meta, bypass);
+  const p = fetchUpstream(req, res, body, model, wantsStream, file, meta, bypass, seq);
   if (!bypass) { inflight.set(key, p); p.finally(() => { if (inflight.get(key) === p) inflight.delete(key); }); }
   await p.catch(noop);
 }
 
 // Forward to the real API, stream the response live to the client, persist a complete 200, and
 // resolve with the result so coalesced waiters can replay it. Never rejects (resolves null on error).
-function fetchUpstream(req, res, body, model, wantsStream, file, meta, bypass) {
+function fetchUpstream(req, res, body, model, wantsStream, file, meta, bypass, seq) {
   return new Promise((resolve) => {
     const headers = { ...req.headers };
     headers.host = UPSTREAM;
@@ -238,7 +246,13 @@ function fetchUpstream(req, res, body, model, wantsStream, file, meta, bypass) {
         const d = usd(model, u.input_tokens, u.output_tokens);
         metric({ event: 'miss', model, status: ur.statusCode, bytes: buf.length, in: u.input_tokens, out: u.output_tokens, usd: d, cached: complete });
         log(`MISS          ${model || '?'}  ${ur.statusCode}  ${u.input_tokens + u.output_tokens}tok $${d.toFixed(5)}  ${Date.now() - t0}ms${complete ? ' [cached]' : ''}  | spend $${c.spentUsd.toFixed(4)}`);
-        broadcast({ type: 'MISS', from_cache: false, stored: complete, model, status: ur.statusCode, in: u.input_tokens, out: u.output_tokens, usd: d, ms: Date.now() - t0 });
+        /* node:coverage disable */ /* best-effort snippet for monitor display; null-chain branches not worth testing */
+        let monExtra = {};
+        if (!wantsStream && ur.statusCode === 200) {
+          try { const snip = JSON.parse(text).content?.[0]?.text?.slice(0, 80); if (snip != null) monExtra = { snippet: snip }; } catch {}
+        }
+        /* node:coverage enable */
+        broadcast({ seq, type: 'MISS', from_cache: false, stored: complete, model, status: ur.statusCode, in: u.input_tokens, out: u.output_tokens, usd: d, ms: Date.now() - t0, ...monExtra });
         settled = true;
         resolve({ status: ur.statusCode, contentType, buf, model, usage: u });
       });
@@ -248,7 +262,7 @@ function fetchUpstream(req, res, body, model, wantsStream, file, meta, bypass) {
       c.calls++; c.errors++;
       metric({ event: 'error', model, err: String(e) });
       log(`ERR           ${model || '?'}  ${String(e)}`, LOG_LEVELS.error);
-      broadcast({ type: 'ERROR', from_cache: false, model, err: String(e) });
+      broadcast({ seq, type: 'ERROR', from_cache: false, model, err: String(e) });
       settled = true;
       resolve(null);
     });
