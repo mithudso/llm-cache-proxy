@@ -17,7 +17,22 @@ NODE_BIN="$(command -v node || echo node)"
 AUTH_HDR=(); [ -n "${CACHE_AUTH_TOKEN:-}" ] && AUTH_HDR=(-H "x-cache-auth: ${CACHE_AUTH_TOKEN}")
 mkdir -p "$HOME/.llm-cache-a"
 
-_stop() { [ -f "$PIDFILE" ] && kill "$(cat "$PIDFILE")" 2>/dev/null || true; rm -f "$PIDFILE"; pkill -f 'proxy-a.mjs' 2>/dev/null || true; }
+_stop() {
+  # On macOS with a launchd agent installed, unload the plist first so launchd
+  # doesn't immediately restart the process we're about to kill (→ EADDRINUSE race).
+  local PL="$HOME/Library/LaunchAgents/com.llm-cache-proxy.plist"
+  if command -v launchctl >/dev/null 2>&1 && [ -f "$PL" ]; then
+    launchctl unload "$PL" 2>/dev/null || true
+  fi
+  [ -f "$PIDFILE" ] && kill "$(cat "$PIDFILE")" 2>/dev/null || true
+  rm -f "$PIDFILE"
+  pkill -f 'proxy-a.mjs' 2>/dev/null || true
+  # Wait up to 5s for the port to be free before returning
+  for _i in 1 2 3 4 5; do
+    lsof -ti :"$PORT" -sTCP:LISTEN >/dev/null 2>&1 || break
+    sleep 1
+  done
+}
 
 # First-run wizard: prompt for the key + core settings and write a chmod-600 .env.
 _setup() {
@@ -87,7 +102,7 @@ U
 <plist version="1.0"><dict>
   <key>Label</key><string>com.llm-cache-proxy</string>
   <key>ProgramArguments</key>
-  <array><string>/bin/bash</string><string>-lc</string><string>cd $REPO && set -a && . ./.env && set +a && exec $NODE_BIN $PROXY</string></array>
+  <array><string>/bin/bash</string><string>-lc</string><string>cd $REPO && set -a && . ./.env && set +a && echo \$\$ > $HOME/.llm-cache-a/proxy.pid && exec $NODE_BIN $PROXY</string></array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
   <key>StandardOutPath</key><string>$LOGFILE</string>
@@ -131,7 +146,7 @@ _start() {
     if [ -t 0 ]; then _setup; [ -f .env ] && { set -a; . ./.env; set +a; }; fi
     [ -n "${ANTHROPIC_API_KEY_REAL:-}" ] || { echo "ERROR: ANTHROPIC_API_KEY_REAL not set (run: $0 setup)." >&2; exit 1; }
   fi
-  _stop; sleep 1
+  _stop
   echo "Starting Option A proxy on :$PORT (cache $1) ..."
   CACHE_OFF="$2" nohup node proxy-a.mjs > "$LOGFILE" 2>&1 &
   echo $! > "$PIDFILE"
@@ -141,6 +156,11 @@ _start() {
     kill -0 "$(cat "$PIDFILE")" 2>/dev/null || { echo "proxy died — see $LOGFILE" >&2; cat "$LOGFILE"; return 1; }
     sleep 1
   done
+  # Re-enable the launchd agent so crash-restart still works (we unloaded it in _stop).
+  local PL="$HOME/Library/LaunchAgents/com.llm-cache-proxy.plist"
+  if command -v launchctl >/dev/null 2>&1 && [ -f "$PL" ]; then
+    launchctl load -w "$PL" 2>/dev/null || true
+  fi
   echo "Point Claude Code at it:"
   echo "  export ANTHROPIC_BASE_URL=http://localhost:$PORT"
   echo "  export ANTHROPIC_API_KEY=anything   # Option A ignores client key; uses .env real key"
@@ -150,7 +170,12 @@ case "${1:-}" in
   help|-h|--help|'-?') _usage; exit 0 ;;
   on)   _start ON "0" ;;
   off)  _start OFF "1" ;;     # bypass: forwards everything, caches nothing
-  stop) _stop; echo "stopped." ;;
+  stop)
+    # Also unload the launchd agent so it doesn't restart after kill (use 'install' to re-enable at boot).
+    PL="$HOME/Library/LaunchAgents/com.llm-cache-proxy.plist"
+    command -v launchctl >/dev/null 2>&1 && [ -f "$PL" ] && launchctl unload "$PL" 2>/dev/null || true
+    _stop
+    echo "stopped." ;;
   stats)
     # Prefer the live /stats endpoint (this-session + all-time); fall back to the metrics log.
     live=$(curl -s ${AUTH_HDR[@]+"${AUTH_HDR[@]}"} "http://localhost:$PORT/stats" 2>/dev/null || true)
@@ -183,13 +208,21 @@ case "${1:-}" in
     # Live operational snapshot: running? on/off? accepting calls? last call? errors/logs this run.
     echo "== llm-cache-proxy status (:$PORT) =="
 
-    # 1) process up?
+    # 1) process up? — check pidfile first; fall back to pgrep (catches launchd-managed restarts
+    #    where the pidfile holds a stale pre-reboot PID)
     if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
       pid=$(cat "$PIDFILE")
       since=$(ps -p "$pid" -o lstart= 2>/dev/null | sed 's/^ *//;s/ *$//' || true)
       echo "process:         RUNNING (pid $pid${since:+, since $since})"
     else
-      echo "process:         NOT RUNNING (no live pid in $PIDFILE)"
+      live_pid=$(pgrep -f 'proxy-a.mjs' 2>/dev/null | head -1 || true)
+      if [ -n "$live_pid" ]; then
+        since=$(ps -p "$live_pid" -o lstart= 2>/dev/null | sed 's/^ *//;s/ *$//' || true)
+        echo "process:         RUNNING via launchd (pid $live_pid${since:+, since $since}) — pidfile stale; run '$0 on' to re-register"
+        echo "$live_pid" > "$PIDFILE"   # update pidfile so future status/stop calls are correct
+      else
+        echo "process:         NOT RUNNING"
+      fi
     fi
 
     # 2) accepting calls? (and 3) cache on/off) — straight from the live endpoints
@@ -244,9 +277,14 @@ case "${1:-}" in
             let e; try { e = JSON.parse(s); } catch { return; }
             if (e.type === "connected") { console.log("  (connected — waiting for calls)"); return; }
             const t = new Date(e.t).toISOString().slice(11, 19);
+            const seq = e.seq != null ? `#${String(e.seq).padStart(4,"0")}` : "     ";
             const tok = (e.in || 0) + (e.out || 0);
             const usd = e.usd != null ? `  $${(+e.usd).toFixed(5)}` : "";
-            console.log(`  ${t}  ${String(e.type).padEnd(15)} ${String(e.model || "?").slice(0, 30).padEnd(30)} ${tok}tok${usd}`);
+            const ms  = e.ms  != null ? `  ${e.ms}ms` : "";
+            const extra = e.type === "ERROR"
+              ? `  err: ${e.err || "?"}`
+              : (e.snippet ? `  | ${e.snippet.replace(/\n/g," ").slice(0,60)}` : "");
+            console.log(`  ${t}  ${seq}  ${String(e.type).padEnd(15)} ${String(e.model || "?").slice(0, 28).padEnd(28)} ${String(tok).padStart(5)}tok${usd}${ms}${extra}`);
           });' ;;
       esac
     done ;;
