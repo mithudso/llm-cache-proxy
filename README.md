@@ -96,8 +96,16 @@ curl localhost:4000/metrics    # Prometheus: llm_cache_{hits,misses,tokens_saved
 curl -N localhost:4000/monitor # realtime SSE: one event per served call (HIT/MISS/…)
 ./cachectl-a.sh stats          # pretty-prints this-session + all-time; offline, reads the ledger
 ./cachectl-a.sh status         # process up? accepting calls? cache on/off? last call? errors this run
-./cachectl-a.sh monitor        # tails /monitor as readable lines
+./cachectl-a.sh monitor        # tails /monitor: #seq type model tok $ ms | snippet
 ```
+
+Monitor output example:
+```
+2026-06-24T14:20:01Z  #0001 MISS claude-haiku-4-5-20251001  33tok $0.00008  1054ms | Gold is a chemical element...
+2026-06-24T14:20:03Z  #0002 HIT  claude-haiku-4-5-20251001  33tok $0.00008    1ms | Gold is a chemical element...
+```
+
+Each event includes a monotonic `seq` counter (per process) and a `snippet` of the first 80 chars of the response — makes it easy to confirm cache hits are returning the right content at a glance.
 
 **Log verbosity:** `CACHE_LOG_LEVEL` = `silent` | `error` | `info` (default) | `debug` (`CACHE_QUIET=1` == silent).
 Logs tee to stdout **and** a default file (`CACHE_LOG_FILE`, default `~/.llm-cache-a/proxy.log`; `none` disables).
@@ -122,6 +130,8 @@ curl -H "x-cache-auth: <token>" http://<host>:4000/v1/messages ...
 ```
 Linux gets a systemd **user** unit (`EnvironmentFile=.env`, `Restart=on-failure`, enabled at boot via linger);
 macOS gets a launchd agent (`RunAtLoad` + restart-on-failure), which sources `.env` via a small wrapper.
+
+Two macOS-specific behaviors are handled correctly: `cachectl-a.sh on/off/stop` unloads the launchd plist before killing the process (preventing `EADDRINUSE` from `KeepAlive` restarting too fast), and `cachectl-a.sh status` falls back to `pgrep` when the pidfile is stale after a system reboot (launchd restarts give the process a new PID), auto-healing the pidfile in place.
 
 ## Cache explorer
 
