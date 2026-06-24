@@ -127,6 +127,108 @@ Pricing override: `~/.llm-cache-a/prices.json`, e.g. `{"haiku":[0.8e-6,4e-6]}` (
 
 ---
 
+## Partial caching (`normalize.json`)
+
+By default the proxy uses an **exact-match** cache key: any difference in the request body — including timestamps in the system prompt or changing tool results — produces a different key and a MISS. The optional `normalize.json` file adds two additional key tiers that strip or ignore those dynamic parts before hashing.
+
+**File location:** `~/.llm-cache-a/normalize.json`
+
+The file is read once at proxy start. After editing it, restart the proxy (`./cachectl-a.sh restart`) for changes to take effect. Run `./cachectl-a.sh validate` to check for JSON or regex errors before restarting.
+
+### Schema
+
+```json
+{
+  "system_strip":  ["regex-1", "regex-2"],
+  "message_strip": ["regex-3"],
+  "suffix_only":   false,
+  "suffix_turns":  3
+}
+```
+
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `system_strip` | `string[]` | `[]` | Regex patterns (ECMAScript, `g` flag) stripped from the **system prompt** before hashing. Each match is replaced with `<NORM>`. |
+| `message_strip` | `string[]` | `[]` | Same, applied to each **message content** string (`gs` flag — dotAll so `.` matches newlines). |
+| `suffix_only` | `boolean` | `false` | When `true`, also try a key built from only the last `suffix_turns` messages (ignoring older history). See caveats below. |
+| `suffix_turns` | `integer` | `3` | Number of recent messages to include in the suffix key. Only used when `suffix_only: true`. |
+
+All fields are optional. An empty object `{}` loads the feature but is a no-op (no patterns, no suffix).
+
+### Tier 2 — normalized key (`HIT-NORM`)
+
+When any pattern matches, the proxy computes a second hash after substitution. If a prior response was stored under that normalized hash, it is served as `x-cache: HIT-NORM` with no upstream call.
+
+**Use `system_strip` for:**
+- Timestamps and dates embedded in the system prompt (`"Current date: [^\\n]*"`)
+- Session or request IDs (`"Session-ID: [a-f0-9-]+"`)
+- Any field that changes every run but doesn't affect what the response should be
+
+**Use `message_strip` for:**
+- Tool results that carry volatile data the model doesn't need for its core answer (`"<tool_result>[\\s\\S]*?</tool_result>"`)
+- Injected context snippets that vary but don't change the question
+
+**Example — strip date + session from system prompt:**
+
+```json
+{
+  "system_strip": [
+    "Current date[^\\n]*",
+    "Session-ID: [a-f0-9-]+"
+  ],
+  "message_strip": [],
+  "suffix_only": false
+}
+```
+
+With this config, these two requests produce the same normalized key and the second is a `HIT-NORM`:
+
+```
+Request 1 system: "Current date: 2026-01-01\nYou are helpful."
+Request 2 system: "Current date: 2026-06-24\nYou are helpful."
+```
+
+Both normalize to `"<NORM>\nYou are helpful."` before hashing.
+
+**JSON regex escaping note:** JSON doubles backslashes. The ECMAScript pattern `\d+` is written `"\\d+"` in JSON. The pattern `[\s\S]*?` (any character, non-greedy) is written `"[\\s\\S]*?"`.
+
+### Tier 3 — suffix key (`HIT-SUFFIX`, gated)
+
+When `suffix_only: true`, the proxy also tries a key built from `(model, system_normalized, messages[-suffix_turns:])` — the last N messages only, ignoring older conversation history. If a stored response matches that suffix, it is served as `x-cache: HIT-SUFFIX`.
+
+**Use when:** you run repeated short exchanges that share the same final question, even from different conversation contexts. Example: an eval suite that asks the same follow-up question after different setup exchanges.
+
+**Do not use when:**
+- The response depends on earlier context that varies (the suffix key would serve a cached response from a different logical conversation)
+- Messages include tool calls or tool results that must match the current context
+- You need guaranteed accuracy over higher hit rates
+
+```json
+{
+  "system_strip": ["Current date[^\\n]*"],
+  "message_strip": [],
+  "suffix_only": true,
+  "suffix_turns": 2
+}
+```
+
+### How alias writes work
+
+On a MISS, the proxy stores the response under the **exact key** and also writes alias files under every active tier-2/3 key. This means:
+
+1. First call with `system: "date: 2026-01-01 ..."` → MISS → writes under exact key **and** normalized key
+2. Second call with `system: "date: 2026-06-24 ..."` → exact miss → finds alias under normalized key → `HIT-NORM`
+
+### Checking your config
+
+```bash
+./cachectl-a.sh validate    # reports JSON parse errors and which patterns fail to compile
+```
+
+The `validate` command tests every regex with `new RegExp(pattern, 'gs')` and reports any that throw. Fix them before restarting.
+
+---
+
 ## HTTP endpoints
 
 | Method · Path | Purpose |
