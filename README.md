@@ -11,6 +11,7 @@ workloads, where the same `/v1/messages` request recurs.
 - **100%-covered** zero-dep unit suite (no network, no paid calls) + a live byte-exact fidelity proof.
 - Realtime `/monitor` stream, **this-session + all-time** stats, log verbosity, a cache-explorer TUI.
 - Loopback by default; opt-in network bind **gated by an auth token**. Optional boot service (systemd / launchd).
+- Optional **partial caching**: strip dynamic fields (timestamps, session IDs, tool results) before hashing → `HIT-NORM`; or key on only the last N messages → `HIT-SUFFIX`.
 
 ## Measured token savings
 
@@ -29,11 +30,16 @@ vs bypass (`cachectl-a.sh off`). Measured via `bench.py` + the proxy ledger:
 (N−1) of them — here 4/5 = 80%. On a rerun/eval/CI suite that re-issues the same
 prompts, that is a direct ~80%+ cut in tokens *and* latency on the repeated portion.
 
-Caveat: only **exact full-call repeats** hit. Novel calls (different messages) are
+By default only **exact full-call repeats** hit. Novel calls (different messages) are
 never cached — so interactive, always-different traffic sees little benefit. This is a
 rerun/eval/CI optimizer, not a general speedup. (`bench.py`'s own "saved %" line is a
 client-side artifact — a cached response still carries usage numbers, so the SDK can't
 tell it was free; the proxy ledger and the 0.001 s latency are ground truth.)
+
+Optional partial caching (`normalize.json`) extends this: `HIT-NORM` strips volatile
+fields before hashing (timestamps in system prompts, changing session IDs), so "same
+logical prompt, different run date" also hits. `HIT-SUFFIX` (gated, higher risk) ignores
+conversation history and keys only on the last N messages — see below.
 
 Reproduce:
 ```bash
@@ -65,7 +71,7 @@ export ANTHROPIC_API_KEY=anything                      # client key ignored; .en
 Control: `./cachectl-a.sh on | off | stop | stats | status | monitor | explore | setup | run | install | uninstall`
 (`off` = bypass: forwards, caches nothing). For brew/npm installs, `llm-cache-proxy <cmd>` is the equivalent.
 
-`npm test` runs the **zero-dep unit suite** against a mock upstream (no network, no key, 100% line/function
+`npm test` runs the **zero-dep unit suite** (43 tests) against a mock upstream (no network, no key, 100% line/function
 coverage of `proxy-a.mjs`); `npm run test:fidelity` runs the **live, paid** byte-exact proof. `bench.py` needs
 `anthropic` (`pip install anthropic`).
 
@@ -73,11 +79,34 @@ coverage of `proxy-a.mjs`); `npm run test:fidelity` runs the **live, paid** byte
 
 ## How it works
 
-Reverse proxy in front of `api.anthropic.com`. Exact-match key =
-`sha256(model + raw request body)`. HIT → replay stored bytes, zero upstream call.
-MISS → forward with the real key, tee the response to client + cache (complete 200s only).
-Cache + metrics live in `~/.llm-cache-a/` (outside the repo). See
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Reverse proxy in front of `api.anthropic.com`. On each request the proxy tries three cache key tiers in order:
+
+| Tier | Key | Label | Active when |
+|---|---|---|---|
+| 1 — exact | `sha256(model + raw body)` | `HIT` | always |
+| 2 — normalized | `sha256(model + normalized body)` | `HIT-NORM` | `normalize.json` present |
+| 3 — suffix | `sha256(model + system_norm + last N messages)` | `HIT-SUFFIX` | `suffix_only: true` |
+
+Exact HIT → replay stored bytes, zero upstream call. MISS → forward with the real key, tee the response to client + cache (complete 200s only), and write alias files under any active normalized/suffix keys so future requests at those tiers can also hit. Cache + metrics live in `~/.llm-cache-a/` (outside the repo). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Partial caching (optional)
+
+Create `~/.llm-cache-a/normalize.json` to enable normalized and suffix matching:
+
+```json
+{
+  "system_strip":  ["Current date[^\\n]*", "Session-ID: [a-f0-9-]+"],
+  "message_strip": ["<tool_result>[\\s\\S]*?</tool_result>"],
+  "suffix_only":   false,
+  "suffix_turns":  3
+}
+```
+
+- **`system_strip`** — regex patterns stripped from the system prompt before hashing. Use for timestamps, dates, session IDs, or any field that changes run-to-run but doesn't affect the response.
+- **`message_strip`** — same, applied to message content. Use for `<tool_result>` blocks that carry dynamic values (file listings, timestamps, prices).
+- **`suffix_only: true`** — also tries a key built from only the last `suffix_turns` messages. Hits when a new conversation shares the same recent context with an earlier one. **Risk:** ignores older history, so a "same last 2 messages" hit in a different logical context replays a response that may not be appropriate. Only enable for idempotent, context-independent queries.
+
+What partial caching does **not** solve: truly interactive sessions where every turn is unique. If the last N messages are always different, no tier hits. The tier-1 exact cache remains the safe, high-confidence path; tiers 2–3 trade some replay confidence for higher hit rates on structured, partially-dynamic workloads.
 
 ## Logging & monitoring
 
@@ -185,10 +214,13 @@ A real `claude -p` agent loop was run through the proxy end to end: correct outp
 streaming intact, zero proxy errors. The proxy is transparent to live Claude Code.
 
 One caveat that the live loop made concrete: **interactive Claude Code sessions do not get
-cross-run cache hits.** Claude Code's request bodies vary run to run (dynamic system prompt
-and context), so two "identical" sessions hash to different keys. Cache wins come from
-**deterministic, byte-identical repeats** (eval suites, CI, scripted SDK calls, `npm test`),
-not from live agent sessions.
+cross-run cache hits by default.** Claude Code's request bodies vary run to run (dynamic
+system prompt and context), so two "identical" sessions hash to different keys. Cache wins
+come from **deterministic, byte-identical repeats** (eval suites, CI, scripted SDK calls,
+`npm test`), not from live agent sessions. Partial caching via `normalize.json` closes part
+of this gap: `HIT-NORM` handles timestamp/session variation in the system prompt; `HIT-SUFFIX`
+handles different conversation prefixes with a shared recent context — but genuinely novel
+interactive turns still miss.
 
 ## Why not LiteLLM
 
