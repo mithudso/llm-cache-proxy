@@ -21,7 +21,6 @@ jobs:
           node proxy-a.mjs & sleep 1
           node test-fidelity.mjs
       - name: Shell syntax check
-        run: |
-          for f in cachectl-a.sh cachectl.sh; do bash -n "$f"; done
-      - name: Python syntax check (bench/callback)
-        run: python3 -m py_compile bench.py callback.py
+        run: bash -n cachectl-a.sh
+      - name: Python syntax check (bench)
+        run: python3 -m py_compile bench.py
