@@ -176,6 +176,22 @@ All configuration is via environment variables (set before `./cachectl-a.sh on`)
 (`haiku`/`sonnet`/`opus`, default opus). Override or extend by writing
 `~/.llm-cache-a/prices.json`, e.g. `{"haiku":[0.0000008,0.000004]}` (`[input, output]` $/token).
 
+**Partial caching (`~/.llm-cache-a/normalize.json`):** By default the proxy uses exact-match keys — any difference in the request body produces a MISS. If your requests vary only in dynamic fields (timestamps in the system prompt, changing session IDs, tool results with volatile data), add a `normalize.json` to strip those fields before hashing:
+
+```json
+{
+  "system_strip":  ["Current date[^\\n]*", "Session-ID: [a-f0-9-]+"],
+  "message_strip": ["<tool_result>[\\s\\S]*?</tool_result>"],
+  "suffix_only":   false,
+  "suffix_turns":  3
+}
+```
+
+- `system_strip` / `message_strip` — ECMAScript regex patterns; each match is replaced with `<NORM>` before hashing. Requests that differ only in matched substrings share a cache entry and return `x-cache: HIT-NORM`.
+- `suffix_only: true` — also try a key built from only the last `suffix_turns` messages (ignores older history). Returns `x-cache: HIT-SUFFIX`. Use with caution: a response from a different earlier context may not be appropriate for the current conversation.
+
+After editing `normalize.json`, restart the proxy and run `./cachectl-a.sh validate` to confirm the patterns compile. Full reference: see `## Partial caching` in [USAGE.md](../USAGE.md).
+
 **Where data lives:** `~/.llm-cache-a/entries/` (cached responses), `~/.llm-cache-a/metrics.jsonl`
 (per-call log), `~/.llm-cache-a/proxy.log` (stdout). All outside the repo.
 
