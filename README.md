@@ -188,11 +188,10 @@ and context), so two "identical" sessions hash to different keys. Cache wins com
 **deterministic, byte-identical repeats** (eval suites, CI, scripted SDK calls, `npm test`),
 not from live agent sessions.
 
-## Deprecated: the LiteLLM attempt
+## Why not LiteLLM
 
-`config.yaml`, `config.nocache.yaml`, `callback.py`, `cachectl.sh`, `requirements.txt`
-are an abandoned LiteLLM-based attempt, kept for history. LiteLLM was dropped: ~87s
-import, >120s flaky startup, the `/v1/messages` passthrough route bypassed the cache
-(0% hits), and `master_key`+wildcard routing required a Prisma DB. The hand-rolled
-Node proxy (`proxy-a.mjs`) replaced it. Details in
+An earlier LiteLLM-based attempt was evaluated and dropped: ~87s import, >120s flaky
+startup, the `/v1/messages` passthrough route bypassed the cache (0% hits), and
+`master_key`+wildcard routing required a Prisma DB. The hand-rolled zero-dependency
+Node proxy (`proxy-a.mjs`) replaced it. Full decision record in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#decision-record-why-hand-rolled-not-litellm).

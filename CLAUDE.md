@@ -10,12 +10,6 @@ rerun/eval/CI/dev-loop workloads (high full-call repeat rate).
 - `cachectl-a.sh` — control: `on` | `off` (bypass) | `stop` | `stats`.
 - `bench.py` — measures savings (needs `pip install anthropic`; not required to run the proxy).
 
-## Deprecated (do not extend)
-`config.yaml`, `config.nocache.yaml`, `callback.py`, `cachectl.sh`, `requirements.txt`
-are the abandoned LiteLLM attempt, kept for history. LiteLLM was dropped: ~87s import,
->120s flaky startup, the `/v1/messages` passthrough route bypassed the cache, and
-master_key+wildcard routing required a Prisma DB. See docs/ARCHITECTURE.md.
-
 ## Run
 ```bash
 ./cachectl-a.sh setup          # first run: prompts for the key + settings, writes .env (chmod 600)
