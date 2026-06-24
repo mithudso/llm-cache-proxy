@@ -141,17 +141,32 @@ In priority order:
 
 ## Appendix: install & use
 
-Single user, macOS or Linux. Needs **Node ≥ 18** to run the proxy (the unit suite needs **Node ≥ 22** for built-in coverage) and a real Anthropic key. No build step, no `npm install`. Full guide: `USAGE.md` (also surfaced by `./cachectl-a.sh --help`) and `docs/INSTALL.md`.
+**Repository:** https://github.com/mithudso/llm-cache-proxy
+
+Single user, macOS or Linux. Needs **Node ≥ 18** to run the proxy (the unit suite needs **Node ≥ 22** for built-in coverage) and a real Anthropic key. Three install paths:
 
 ```bash
+# Homebrew (macOS / Linux) — recommended; no git clone needed
+brew install mithudso/tap/llm-cache-proxy
+
+# npm — global install or one-off via npx
+npm install -g llm-cache-proxy
+npx llm-cache-proxy <cmd>
+
+# From source
 git clone https://github.com/mithudso/llm-cache-proxy.git && cd llm-cache-proxy
-./cachectl-a.sh setup                                       # prompts for key + settings, writes .env (chmod 600)
-./cachectl-a.sh on                                          # start on :4000 (<2s)
-export ANTHROPIC_BASE_URL=http://localhost:4000             # point Claude Code / SDK at it
-export ANTHROPIC_API_KEY=anything                           # client key ignored; .env key is used
 ```
 
-Operate: `./cachectl-a.sh on | off | stop | stats | status | monitor | explore | setup | run | install | uninstall`
+For Homebrew and npm installs, `llm-cache-proxy <cmd>` replaces `./cachectl-a.sh <cmd>`. First run:
+
+```bash
+llm-cache-proxy setup   # or ./cachectl-a.sh setup — prompts for key + settings, writes .env (chmod 600)
+llm-cache-proxy on      # start on :4000 (<2s)
+export ANTHROPIC_BASE_URL=http://localhost:4000   # point Claude Code / SDK at it
+export ANTHROPIC_API_KEY=anything                 # client key ignored; .env key is used
+```
+
+Operate: `on | off | stop | stats | status | monitor | explore | setup | run | install | uninstall`
 (`off` = bypass). Verify with `npm test` (zero-dep unit suite, 43 tests, 100% line/function coverage, no paid calls)
 and `npm run test:fidelity` (live paid proof, expects 23/23); inspect with `curl localhost:4000/stats`
 (this-session + all-time) and `./cachectl-a.sh monitor` (realtime). Configuration is via env vars
