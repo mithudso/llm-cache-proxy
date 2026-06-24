@@ -1,11 +1,24 @@
 {
   "name": "llm-cache-proxy",
-  "version": "2.0.0",
-  "files": ["proxy-a.mjs", "cachectl-a.sh", "cache-explorer.mjs", "cli.mjs", "bench.py", "test-fidelity.mjs", "docs/", "USAGE.md", "README.md", "LICENSE"],
+  "version": "2.0.1",
+  "files": [
+    "proxy-a.mjs",
+    "cachectl-a.sh",
+    "cache-explorer.mjs",
+    "cli.mjs",
+    "bench.py",
+    "test-fidelity.mjs",
+    "docs/",
+    "USAGE.md",
+    "README.md",
+    "LICENSE"
+  ],
   "description": "Local-only, zero-dependency byte-exact caching reverse proxy for the Anthropic Messages API. Replays cached responses with no upstream call on exact-match repeats.",
   "type": "module",
   "main": "proxy-a.mjs",
-  "bin": { "llm-cache-proxy": "cli.mjs" },
+  "bin": {
+    "llm-cache-proxy": "cli.mjs"
+  },
   "scripts": {
     "start": "node proxy-a.mjs",
     "on": "./cachectl-a.sh on",
@@ -19,9 +32,23 @@
     "test": "node --test --experimental-test-coverage --test-coverage-include=proxy-a.mjs --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=99 'proxy*.test.mjs'",
     "test:fidelity": "node test-fidelity.mjs"
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "license": "MIT",
   "author": "Mitch Hudson <mitchphudson@gmail.com>",
-  "repository": { "type": "git", "url": "https://github.com/mithudso/llm-cache-proxy.git" },
-  "keywords": ["anthropic", "claude", "llm", "cache", "proxy", "token-savings", "sse", "tool-use"]
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mithudso/llm-cache-proxy.git"
+  },
+  "keywords": [
+    "anthropic",
+    "claude",
+    "llm",
+    "cache",
+    "proxy",
+    "token-savings",
+    "sse",
+    "tool-use"
+  ]
 }
