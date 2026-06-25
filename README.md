@@ -55,6 +55,7 @@ git clone https://github.com/mithudso/llm-cache-proxy.git && cd llm-cache-proxy 
 
 ## Run
 
+**From source:**
 ```bash
 git clone https://github.com/mithudso/llm-cache-proxy.git && cd llm-cache-proxy
 ./cachectl-a.sh setup                                  # prompts for key + settings, writes .env (chmod 600)
@@ -62,20 +63,18 @@ git clone https://github.com/mithudso/llm-cache-proxy.git && cd llm-cache-proxy
 export ANTHROPIC_BASE_URL=http://localhost:4000        # point Claude Code / SDK at it
 export ANTHROPIC_API_KEY=anything                      # client key ignored; .env key is used
 ```
-Control: `./cachectl-a.sh on | off | stop | stats | status | monitor | explore | setup | run | install | uninstall`
-(`off` = bypass: forwards, caches nothing).
 
-`npm test` runs the **zero-dep unit suite** against a mock upstream (no network, no key, 100% line/function
-coverage of `proxy-a.mjs`); `npm run test:fidelity` runs the **live, paid** byte-exact proof. `bench.py` needs
-`anthropic` (`pip install anthropic`).
-printf 'ANTHROPIC_API_KEY_REAL=sk-ant-...\n' > .env   # your real key; gitignored
-llm-cache-proxy on                                    # brew/npm CLI (from source: ./cachectl-a.sh on)
-export ANTHROPIC_BASE_URL=http://localhost:4000        # point Claude Code / SDK at it
+**From brew/npm:**
+```bash
+printf 'ANTHROPIC_API_KEY_REAL=sk-ant-...\n' > .env   # your real key; gitignored, chmod 600
+llm-cache-proxy on                                    # starts on :4000
+export ANTHROPIC_BASE_URL=http://localhost:4000
 export ANTHROPIC_API_KEY=anything                      # client key ignored; .env key is used
 ```
 
-Control: `llm-cache-proxy on | off | stop | stats` (brew/npm) or `./cachectl-a.sh …` (from source); `off` = bypass.
-`npm test` runs the fidelity proof; `bench.py` needs `anthropic` (`pip install anthropic`).
+**Control:** `llm-cache-proxy on | off | stop | stats | status | monitor | explore` (brew/npm) or `./cachectl-a.sh …` (from source). Use `off` for bypass mode (forwards, caches nothing).
+
+**Testing:** `npm test` runs the **zero-dep unit suite** against a mock upstream (no network, no key, 100% line/function coverage of `proxy-a.mjs`). `npm run test:fidelity` runs the **live, paid** byte-exact proof. `bench.py` needs `pip install anthropic`.
 
 **Full guide:** [docs/INSTALL.md](docs/INSTALL.md) — prerequisites, configuration (env vars, per-model pricing), client setup, monitoring, troubleshooting, uninstall.
 
