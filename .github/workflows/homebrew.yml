@@ -1,0 +1,69 @@
+name: homebrew-tap-bump
+# Release-triggered Homebrew bump: when a GitHub Release is published, recompute
+# the tag tarball's sha256 and update the formula in mithudso/homebrew-tap.
+#
+# Requires a Personal Access Token with write (contents) access to the TAP repo,
+# stored as the HOMEBREW_TAP_TOKEN repo secret (the default GITHUB_TOKEN cannot
+# push to another repository). A fine-grained PAT scoped to just
+# mithudso/homebrew-tap with Contents: Read and write is sufficient. Set it with:
+#   gh secret set HOMEBREW_TAP_TOKEN --repo mithudso/llm-cache-proxy
+on:
+  release:
+    types: [published]
+
+jobs:
+  bump:
+    # Skip prereleases; only bump the tap for full releases.
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compute tag, version, url, and sha256 of the release tarball
+        id: meta
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          case "$TAG" in
+            v*) : ;;
+            *) echo "::error::tag '$TAG' does not start with 'v'"; exit 1 ;;
+          esac
+          VERSION="${TAG#v}"
+          URL="https://github.com/${{ github.repository }}/archive/refs/tags/${TAG}.tar.gz"
+          SHA="$(curl -fsSL "$URL" | shasum -a 256 | awk '{print $1}')"
+          if [ -z "$SHA" ]; then echo "::error::failed to compute sha256"; exit 1; fi
+          {
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "url=$URL"
+            echo "sha256=$SHA"
+          } >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG version=$VERSION sha256=$SHA"
+
+      - name: Checkout the homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: mithudso/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Update the formula url + sha256
+        run: |
+          FORMULA="tap/Formula/llm-cache-proxy.rb"
+          test -f "$FORMULA"
+          sed -i -E \
+            -e "s#^([[:space:]]*url ).*#\1\"${{ steps.meta.outputs.url }}\"#" \
+            -e "s#^([[:space:]]*sha256 ).*#\1\"${{ steps.meta.outputs.sha256 }}\"#" \
+            "$FORMULA"
+          echo "== diff (expect only url + sha256) =="
+          git -C tap --no-pager diff -- Formula/llm-cache-proxy.rb
+
+      - name: Commit and push the bump
+        run: |
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- Formula/llm-cache-proxy.rb; then
+            echo "Formula already at ${{ steps.meta.outputs.version }} — nothing to do."
+            exit 0
+          fi
+          git add Formula/llm-cache-proxy.rb
+          git commit -m "llm-cache-proxy ${{ steps.meta.outputs.version }}"
+          git push
