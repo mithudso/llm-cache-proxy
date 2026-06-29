@@ -1,6 +1,6 @@
 {
   "name": "llm-cache-proxy",
-  "version": "2.0.5",
+  "version": "2.0.6",
   "files": [
     "proxy-a.mjs",
     "cachectl-a.sh",
