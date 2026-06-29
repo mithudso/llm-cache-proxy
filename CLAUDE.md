@@ -5,10 +5,21 @@ Local-only, zero-dependency caching reverse proxy for the Anthropic Messages API
 response with **no upstream call** → 100% token save per hit. Built for
 rerun/eval/CI/dev-loop workloads (high full-call repeat rate).
 
+## Working agreement
+The owner prefers a **proactive** agent. Carry out recommended, in-scope, non-destructive
+follow-up actions **without waiting for confirmation**, and keep going through any further
+recommendations until none remain — don't end a turn with "I can do X if you'd like."
+Reserve ask-first only for genuinely destructive or irreversible actions: `git push`,
+committing, dependency installs, deleting files, deploys, or changing ticket/branch state.
+Summarize what you did at the end.
+
 ## Canonical implementation
-- `proxy-a.mjs` — the proxy (Node, **zero dependencies**: `node:http/https/crypto/fs`).
-- `cachectl-a.sh` — control: `on` | `off` (bypass) | `stop` | `stats`.
+- `proxy-a.mjs` — the proxy (Node, **zero dependencies**: `node:http/https/crypto/fs`); package `main`, and host of the `node proxy-a.mjs <cmd>` routines (below).
+- `cli.mjs` — the **installed** entrypoint (`bin: llm-cache-proxy`); a cross-platform Node port of `cachectl-a.sh` (`on`|`off`|`stop`|`stats`|`setup`) that spawns `proxy-a.mjs`. This is how npm/Homebrew installs are driven (`.env` search: `~/.llm-cache-a/.env` then `./.env`).
+- `cachectl-a.sh` — the **source-checkout** control surface (full verb list below); the shell counterpart to `cli.mjs`.
+- `cache-explorer.mjs` — standalone cache-explorer TUI behind the `explore` verb; a user tool, **not** loaded by the proxy itself.
 - `bench.py` — measures savings (needs `pip install anthropic`; not required to run the proxy).
+- `test-helpers.mjs` — shared harness for the `proxy*.test.mjs` suite (see Concurrency & tests).
 
 ## Run
 ```bash
