@@ -131,6 +131,41 @@ coverage of `proxy-a.mjs`); `npm run test:fidelity` runs the **live, paid** byte
 
 **Full guide:** [USAGE.md](USAGE.md) (or `./cachectl-a.sh --help`) · [docs/INSTALL.md](docs/INSTALL.md) — prerequisites, configuration (env vars, per-model pricing), client setup, monitoring, troubleshooting, uninstall.
 
+## Client compatibility
+
+The proxy is a drop-in for any client that (a) speaks the Anthropic **Messages API**
+(`POST /v1/messages`) and (b) honors `ANTHROPIC_BASE_URL`. Point that client at the proxy and
+caching is transparent — no client-side changes beyond the base URL.
+
+| Client | Works? | How |
+|---|---|---|
+| **Claude Code** (`claude`) | ✅ | `export ANTHROPIC_BASE_URL=http://localhost:4000` |
+| **Anthropic SDK** (Python / TS) | ✅ | set `base_url` (or `ANTHROPIC_BASE_URL`) to the proxy |
+| **`curl` / scripts** | ✅ | `POST http://localhost:4000/v1/messages` |
+| **Augment CLI ("Auggie")** | ❌ | not possible — see below |
+
+The proxy injects the real key itself, so a client's own key is ignored (send
+`ANTHROPIC_API_KEY=anything`). For gateway-style clients that carry the key in the
+`Authorization` header the relevant variable is `ANTHROPIC_AUTH_TOKEN`, but the proxy strips and
+replaces it upstream regardless.
+
+### Why Auggie (Augment CLI) can't use the proxy
+
+Auggie does **not** route through the Anthropic Messages API, so an Anthropic `/v1/messages`
+cache can never observe its traffic:
+
+- Auggie ignores `ANTHROPIC_BASE_URL` (the variable appears **0 times** in its binary) and never
+  contacts `api.anthropic.com`. Every request goes to **Augment's own backend** (the agent +
+  context engine), authenticated by an `auggie login` session
+  (`~/.augment/session.json` / `AUGMENT_SESSION_AUTH`) — not an Anthropic API key.
+- Even with Augment's server-side BYOK (`AUGMENT_ANTHROPIC_API_KEY`), the model call originates
+  from Augment's servers, not your machine, so a loopback proxy has nothing to intercept.
+
+Setting `ANTHROPIC_BASE_URL=http://localhost:4000` before `auggie` therefore has no effect: Auggie
+connects to Augment as usual and the proxy stays idle. (The `ANTHROPIC_API_KEY` references in
+Augment's docs are for the separate **Claude Code** ACP adapter, which — being Claude Code —
+*does* work with the proxy.)
+
 ## How it works
 
 Reverse proxy in front of `api.anthropic.com`. On each request the proxy tries three cache key tiers in order:

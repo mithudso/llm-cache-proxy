@@ -33,6 +33,27 @@ export ANTHROPIC_API_KEY=anything                # client key is ignored; the .e
 
 ---
 
+## Client compatibility
+
+Works with any client that speaks the Anthropic **Messages API** (`POST /v1/messages`) and honors
+`ANTHROPIC_BASE_URL`:
+
+| Client | Works? | How |
+|---|---|---|
+| Claude Code (`claude`) | ✅ | `export ANTHROPIC_BASE_URL=http://localhost:4000` |
+| Anthropic SDK (Python / TS) | ✅ | set `base_url` (or `ANTHROPIC_BASE_URL`) to the proxy |
+| `curl` / scripts | ✅ | `POST http://localhost:4000/v1/messages` |
+| Augment CLI ("Auggie") | ❌ | not supported (see below) |
+
+**Auggie is not supported.** The Augment CLI ignores `ANTHROPIC_BASE_URL` (0 occurrences in its
+binary) and never calls `api.anthropic.com`. It sends all traffic to Augment's own backend,
+authenticated by an `auggie login` session (`~/.augment/session.json` / `AUGMENT_SESSION_AUTH`),
+not an Anthropic key — so an Anthropic-`/v1/messages` cache has nothing to intercept, and setting
+`ANTHROPIC_BASE_URL` before `auggie` simply has no effect. (Augment's server-side BYOK
+`AUGMENT_ANTHROPIC_API_KEY` runs from Augment's servers, also outside a local proxy's path.)
+
+---
+
 ## Control script (`cachectl-a.sh`)
 
 ```
