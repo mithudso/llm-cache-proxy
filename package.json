@@ -50,5 +50,20 @@
     "token-savings",
     "sse",
     "tool-use"
-  ]
+  ],
+  "dependencies": {
+    "@antv/infographic": "^0.2.19",
+    "chrome-debugging-client": "^2.1.0",
+    "chrome-devtools-frontend": "^1.0.1652307",
+    "chrome-remote-interface": "^0.34.0",
+    "mcp-mermaid": "^0.4.1",
+    "ndb": "^1.1.5",
+    "playwright": "^1.61.1",
+    "thetool": "^0.5.1"
+  },
+  "allowScripts": {
+    "mcp-mermaid@0.4.1": true,
+    "fsevents@2.3.2": true,
+    "puppeteer-core@1.12.2": true
+  }
 }

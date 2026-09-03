@@ -1,3 +1,9 @@
+# Semantic Indexing Rule
+- Do NOT use `view_file` to blindly explore large files.
+- ALWAYS use the `search_codebase` MCP tool (local semantic index) first to pull semantic chunks.
+- If the index does not exist, build it using `scripts/semantic_indexer.py`.
+- If the MCP server is not running or fails, attempt to start it. If it still fails, only then fallback to `view_file`.
+
 # CLAUDE.md — llm-cache-proxy
 
 Local-only, zero-dependency caching reverse proxy for the Anthropic Messages API
