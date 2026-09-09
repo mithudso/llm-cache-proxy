@@ -55,6 +55,37 @@ try { Object.assign(PRICES, JSON.parse(fs.readFileSync(path.join(DIR, 'prices.js
 const priceFor = (m) => { m = (m || '').toLowerCase(); for (const k in PRICES) if (m.includes(k)) return PRICES[k]; return DEFAULT_PRICE; };
 const usd = (m, i, o) => { const [pi, po] = priceFor(m); return i * pi + o * po; };
 
+// ---- partial / normalized caching (optional; ~/.llm-cache-a/normalize.json) ----
+// When loaded, two additional cache-key tiers are attempted on exact-key miss:
+//   HIT-NORM   — full conversation, but dynamic fields stripped (timestamps, session IDs, etc.)
+//   HIT-SUFFIX — suffix_only:true only; ignores old history, keys on last suffix_turns messages
+// Both tiers also cause a MISS to write alias files so future requests can hit.
+let NORM_PATTERNS = null;
+try {
+  const raw = JSON.parse(fs.readFileSync(path.join(DIR, 'normalize.json'), 'utf8'));
+  NORM_PATTERNS = {
+    systemRe:    (raw.system_strip  || []).map(p => new RegExp(p, 'g')),
+    messageRe:   (raw.message_strip || []).map(p => new RegExp(p, 'gs')),
+    suffix_only:  !!raw.suffix_only,
+    suffix_turns: +(raw.suffix_turns ?? 3),
+  };
+} catch {}
+
+// Returns a shallow-cloned parsed body with dynamic fields stripped per NORM_PATTERNS.
+function normalizeBody(parsed) {
+  const out = { ...parsed };
+  if (typeof out.system === 'string')
+    for (const re of NORM_PATTERNS.systemRe) out.system = out.system.replace(re, '<NORM>');
+  if (Array.isArray(out.messages))
+    out.messages = out.messages.map((msg) => {
+      if (typeof msg.content !== 'string') return msg;
+      let c = msg.content;
+      for (const re of NORM_PATTERNS.messageRe) c = c.replace(re, '<NORM>');
+      return c === msg.content ? msg : { ...msg, content: c };
+    });
+  return out;
+}
+
 // ---- counters (seeded from the metrics log so /stats survives restarts) ----
 const c = {
   startedAt: Date.now(), calls: 0, hits: 0, coalesced: 0, misses: 0, errors: 0,
@@ -146,7 +177,7 @@ async function readHit(file, meta) {
 }
 
 // Replay a cached payload to the client byte-for-byte, update hit counters, log, and broadcast.
-function serveHit(res, m, buf, label) {
+function serveHit(res, m, buf, label, seq) {
   safe(res, () => { res.writeHead(200, { 'content-type': m.contentType || 'application/json', 'x-cache': label }); res.end(buf); });
   const inT = m.usage?.input_tokens || 0, outT = m.usage?.output_tokens || 0;
   const d = usd(m.model, inT, outT);
@@ -154,13 +185,20 @@ function serveHit(res, m, buf, label) {
   if (label === 'HIT-COALESCED') c.coalesced++;
   metric({ event: 'hit', model: m.model, bytes: buf.length, in: inT, out: outT, usd: d, coalesced: label === 'HIT-COALESCED' });
   log(`${label.padEnd(13)} ${m.model || '?'}  +${inT + outT}tok $${d.toFixed(5)}  | saved $${c.savedUsd.toFixed(4)} / ${c.savedIn + c.savedOut}tok  hit-rate ${hitRate().toFixed(1)}%`);
-  broadcast({ type: label, from_cache: true, model: m.model, in: inT, out: outT, usd: d });
+  /* node:coverage disable */ /* best-effort snippet for monitor display; null-chain branches not worth testing */
+  let monExtra = {};
+  if ((m.contentType || '').includes('application/json')) {
+    try { const snip = JSON.parse(buf.toString('utf8')).content?.[0]?.text?.slice(0, 80); if (snip != null) monExtra = { snippet: snip }; } catch {}
+  }
+  /* node:coverage enable */
+  broadcast({ seq, type: label, from_cache: true, model: m.model, in: inT, out: outT, usd: d, ...monExtra });
 }
 
 const inflight = new Map();   // key -> Promise<{status, contentType, buf, model, usage}>
 
 // ---- realtime monitor: GET /monitor holds an SSE stream; every served call is broadcast live ----
 const monitors = new Set();   // open /monitor response objects
+let callSeq = 0;              // monotonic per-process call counter, included in every broadcast event
 const broadcast = (ev) => {
   if (!monitors.size) return;
   const line = `data: ${JSON.stringify({ t: Date.now(), ...ev })}\n\n`;
@@ -169,6 +207,7 @@ const broadcast = (ev) => {
 
 // Core request path: hash the body to a key, then try disk-cache → coalesce → upstream fetch.
 async function handle(req, res, body) {
+  const seq = ++callSeq;
   let parsed = {}; try { parsed = JSON.parse(body.toString('utf8')); } catch {}
   const model = parsed.model || '';
   const wantsStream = parsed.stream === true;
@@ -178,31 +217,55 @@ async function handle(req, res, body) {
   const bypass = CACHE_OFF || req.headers['x-cache-bypass'] === '1';
   log(`DEBUG ${model || '?'} key=${key.slice(0, 12)} stream=${wantsStream}${bypass ? ' bypass' : ''}`, LOG_LEVELS.debug);
 
-  // 1) disk cache hit
+  // Pre-compute alias keys (normalize + suffix) so MISS writes under them too.
+  let normKey = null, sufKey = null;
+  const aliasKeys = [];
+  if (!bypass && NORM_PATTERNS) {
+    const normed = normalizeBody(parsed);
+    const normBuf = Buffer.from(JSON.stringify(normed));
+    const nk = crypto.createHash('sha256').update(model + '\n').update(normBuf).digest('hex');
+    if (nk !== key) { normKey = nk; aliasKeys.push(nk); }
+    if (NORM_PATTERNS.suffix_only) {
+      const sufMsgs = (normed.messages || []).slice(-NORM_PATTERNS.suffix_turns);
+      const sufBuf = Buffer.from(JSON.stringify({ ...normed, messages: sufMsgs }));
+      const sk = crypto.createHash('sha256').update(model + '\n').update(sufBuf).digest('hex');
+      if (sk !== key && sk !== nk) { sufKey = sk; aliasKeys.push(sk); }
+    }
+  }
+
+  // 1) disk cache hit (exact → normalized → suffix)
   if (!bypass) {
-    try { const h = await readHit(file, meta); if (h) { serveHit(res, h.m, h.buf, 'HIT'); return; } } catch {}
+    try { const h = await readHit(file, meta); if (h) { serveHit(res, h.m, h.buf, 'HIT', seq); return; } } catch {}
+    if (normKey) {
+      try { const h = await readHit(path.join(ENTRIES, normKey + '.bin'), path.join(ENTRIES, normKey + '.json')); if (h) { serveHit(res, h.m, h.buf, 'HIT-NORM', seq); return; } } catch {}
+    }
+    if (sufKey) {
+      try { const h = await readHit(path.join(ENTRIES, sufKey + '.bin'), path.join(ENTRIES, sufKey + '.json')); if (h) { serveHit(res, h.m, h.buf, 'HIT-SUFFIX', seq); return; } } catch {}
+    }
   }
 
   // 2) coalesce onto an in-flight identical fetch (no second upstream call)
   if (!bypass && inflight.has(key)) {
     try {
       const r = await inflight.get(key);
-      if (r && r.status === 200) { serveHit(res, { contentType: r.contentType, model: r.model, usage: r.usage }, r.buf, 'HIT-COALESCED'); return; }
+      if (r && r.status === 200) { serveHit(res, { contentType: r.contentType, model: r.model, usage: r.usage }, r.buf, 'HIT-COALESCED', seq); return; }
       // first fetch was non-200/errored: replay its status+body so the waiter sees the same result
-      if (r) { safe(res, () => { res.writeHead(r.status, { 'content-type': r.contentType, 'x-cache': 'MISS-COALESCED' }); res.end(r.buf); }); broadcast({ type: 'MISS-COALESCED', from_cache: false, model: r.model, status: r.status }); return; }
+      if (r) { safe(res, () => { res.writeHead(r.status, { 'content-type': r.contentType, 'x-cache': 'MISS-COALESCED' }); res.end(r.buf); }); broadcast({ seq, type: 'MISS-COALESCED', from_cache: false, model: r.model, status: r.status }); return; }
     } catch {}
     // fall through to own fetch if the shared one rejected
   }
 
   // 3) MISS — fetch upstream, stream live to THIS client, share the result via inflight
-  const p = fetchUpstream(req, res, body, model, wantsStream, file, meta, bypass);
+  const p = fetchUpstream(req, res, body, model, wantsStream, file, meta, bypass, seq, aliasKeys);
   if (!bypass) { inflight.set(key, p); p.finally(() => { if (inflight.get(key) === p) inflight.delete(key); }); }
   await p.catch(noop);
 }
 
 // Forward to the real API, stream the response live to the client, persist a complete 200, and
 // resolve with the result so coalesced waiters can replay it. Never rejects (resolves null on error).
-function fetchUpstream(req, res, body, model, wantsStream, file, meta, bypass) {
+// aliasKeys: additional cache keys (norm, suffix) to also write on a complete 200 so future
+// normalized-equivalent requests hit without going upstream.
+function fetchUpstream(req, res, body, model, wantsStream, file, meta, bypass, seq, aliasKeys = []) {
   return new Promise((resolve) => {
     const headers = { ...req.headers };
     headers.host = UPSTREAM;
@@ -226,9 +289,14 @@ function fetchUpstream(req, res, body, model, wantsStream, file, meta, bypass) {
         const complete = ur.statusCode === 200 && (!wantsStream || text.includes('message_stop'));
         if (complete && !bypass) {
           try {
+            const metaJson = JSON.stringify({ ts: Date.now(), model, contentType, usage: u });
             await fsp.writeFile(file, buf);
-            await fsp.writeFile(meta, JSON.stringify({ ts: Date.now(), model, contentType, usage: u }));
-            if (entryCount !== null) entryCount++;
+            await fsp.writeFile(meta, metaJson);
+            for (const ak of aliasKeys) {
+              await fsp.writeFile(path.join(ENTRIES, ak + '.bin'), buf);
+              await fsp.writeFile(path.join(ENTRIES, ak + '.json'), metaJson);
+            }
+            if (entryCount !== null) entryCount += 1 + aliasKeys.length;
             maybePrune();
           /* node:coverage disable */ /* a failed cache write must not break the live response */
           } catch {}
@@ -238,7 +306,13 @@ function fetchUpstream(req, res, body, model, wantsStream, file, meta, bypass) {
         const d = usd(model, u.input_tokens, u.output_tokens);
         metric({ event: 'miss', model, status: ur.statusCode, bytes: buf.length, in: u.input_tokens, out: u.output_tokens, usd: d, cached: complete });
         log(`MISS          ${model || '?'}  ${ur.statusCode}  ${u.input_tokens + u.output_tokens}tok $${d.toFixed(5)}  ${Date.now() - t0}ms${complete ? ' [cached]' : ''}  | spend $${c.spentUsd.toFixed(4)}`);
-        broadcast({ type: 'MISS', from_cache: false, stored: complete, model, status: ur.statusCode, in: u.input_tokens, out: u.output_tokens, usd: d, ms: Date.now() - t0 });
+        /* node:coverage disable */ /* best-effort snippet for monitor display; null-chain branches not worth testing */
+        let monExtra = {};
+        if (!wantsStream && ur.statusCode === 200) {
+          try { const snip = JSON.parse(text).content?.[0]?.text?.slice(0, 80); if (snip != null) monExtra = { snippet: snip }; } catch {}
+        }
+        /* node:coverage enable */
+        broadcast({ seq, type: 'MISS', from_cache: false, stored: complete, model, status: ur.statusCode, in: u.input_tokens, out: u.output_tokens, usd: d, ms: Date.now() - t0, ...monExtra });
         settled = true;
         resolve({ status: ur.statusCode, contentType, buf, model, usage: u });
       });
@@ -248,7 +322,7 @@ function fetchUpstream(req, res, body, model, wantsStream, file, meta, bypass) {
       c.calls++; c.errors++;
       metric({ event: 'error', model, err: String(e) });
       log(`ERR           ${model || '?'}  ${String(e)}`, LOG_LEVELS.error);
-      broadcast({ type: 'ERROR', from_cache: false, model, err: String(e) });
+      broadcast({ seq, type: 'ERROR', from_cache: false, model, err: String(e) });
       settled = true;
       resolve(null);
     });
