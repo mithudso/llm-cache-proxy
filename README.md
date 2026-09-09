@@ -104,6 +104,18 @@ To re-run setup or change the key: `llm-cache-proxy setup` (Homebrew/npm) or `./
 **`validate` — config + runtime health check:**
 
 ```
+
+**From brew/npm:**
+```bash
+printf 'ANTHROPIC_API_KEY_REAL=sk-ant-...\n' > .env   # your real key; gitignored, chmod 600
+llm-cache-proxy on                                    # starts on :4000
+export ANTHROPIC_BASE_URL=http://localhost:4000
+export ANTHROPIC_API_KEY=anything                      # client key ignored; .env key is used
+```
+
+**Control:** `llm-cache-proxy on | off | stop | stats | status | monitor | explore` (brew/npm) or `./cachectl-a.sh …` (from source). Use `off` for bypass mode (forwards, caches nothing).
+
+**Testing:** `npm test` runs the **zero-dep unit suite** against a mock upstream (no network, no key, 100% line/function coverage of `proxy-a.mjs`). `npm run test:fidelity` runs the **live, paid** byte-exact proof. `bench.py` needs `pip install anthropic`.
 $ llm-cache-proxy validate
 
 == llm-cache-proxy validate ==
