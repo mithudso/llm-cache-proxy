@@ -272,6 +272,8 @@ function fetchUpstream(req, res, body, model, wantsStream, file, meta, bypass, s
     headers['x-api-key'] = REAL_KEY;
     delete headers['authorization'];
     delete headers['accept-encoding'];
+    delete headers['x-cache-auth'];     // proxy-local control headers must not leak upstream
+    delete headers['x-cache-bypass'];
     headers['content-length'] = Buffer.byteLength(body);
 
     const t0 = Date.now();
