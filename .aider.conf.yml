@@ -1,0 +1,4 @@
+test-cmd: npm test
+lint-cmd: npm run check
+auto-test: false
+auto-lint: false

@@ -5,7 +5,7 @@ through the proxy, and prints cold-vs-warm cost. This produces the REAL numbers
 the design doc only modeled.
 
 Prereqs:
-  pip install anthropic            # requirements.txt is the deprecated LiteLLM stack
+  pip install anthropic            # only dependency; the proxy itself is zero-dep
   export ANTHROPIC_API_KEY_REAL=sk-ant-...   # set in your SHELL, never in this file
   ./cachectl-a.sh on
 Run:
