@@ -2,7 +2,7 @@
 
 This review evaluates **llm-cache-proxy**, a zero-dependency local caching proxy for the Anthropic Messages API. It is written for an engineer deciding whether to adopt the tool, extend it, or trust it on live agent traffic. It covers design, the implementation in `proxy-a.mjs`, the measured benchmark, observability, security posture, and the boundaries of where the tool earns its keep. It is not a usage guide (the README covers that) or a security audit.
 
-_Updated 2026-06-23: logging & monitoring (PR #2), concurrency hardening + a streaming/tool_use fidelity proof (PR #3), npm/CLI install packaging (PR #5), then a major feature pass (PR #6) shipped as **v2.0.0** (PR #8). That pass refactored the proxy into an importable, **100%-unit-tested** module (mock-upstream `node:test` suite, no paid calls), then added a loopback-by-default bind with token auth, log verbosity + a default log file, a realtime `/monitor` SSE stream, this-session vs all-time stats, a first-run setup wizard, boot-service install (systemd/launchd), a cache-explorer TUI, and a CLI for the core routines; it installs via npm (`npm i -g llm-cache-proxy`) or Homebrew (`brew tap mithudso/tap`). The live fidelity proof was re-run against the real API (23/23) to confirm the refactor changed no observable behavior. Code references use function names, since line numbers move across rewrites._
+_Updated 2026-06-23: logging & monitoring (PR #2), concurrency hardening + a streaming/tool_use fidelity proof (PR #3), npm/CLI install packaging (PR #5), then a major feature pass (PR #6) shipped as **v2.0.0** (PR #8). That pass refactored the proxy into an importable, **100%-unit-tested** module (mock-upstream `node:test` suite, no paid calls), then added a loopback-by-default bind with token auth, log verbosity + a default log file, a realtime `/monitor` SSE stream, this-session vs all-time stats, a first-run setup wizard, boot-service install (systemd/launchd), a cache-explorer TUI, and a CLI for the core routines; it installs via npm (`npm i -g llm-cache-proxy`) or Homebrew (`brew tap mithudso/tap`). The live fidelity proof was re-run against the real API (23/23) to confirm the refactor changed no observable behavior. A post-release docs/robustness pass (PRs #10–#11) then added a full **USAGE.md** guide — surfaced by `cachectl-a.sh -h|--help|-?`, on an unknown command, or on no command (paged via `less -R` on a TTY) — and hardened the control script for **macOS's bash 3.2** by making the auth-header array `set -u`-safe. Code references use function names, since line numbers move across rewrites._
 
 ## Verdict
 
@@ -31,7 +31,7 @@ The latest refactor made the module **importable without side effects**: `start`
 
 ## Implementation review
 
-The code is clean, flat, and auditable: about 440 lines (up from ~230; the bind/auth gate, verbosity, default log file, the `/monitor` broadcaster, session-vs-all-time stats, the CLI dispatch, and inline docs landed since), still no dependencies beyond Node built-ins. The control surface (`cachectl-a.sh`), the cache explorer (`cache-explorer.mjs`), the benchmark (`bench.py`), and the fidelity test (`test-fidelity.mjs`) are equally direct.
+The code is clean, flat, and auditable: about 370 lines (up from ~230; the bind/auth gate, verbosity, default log file, the `/monitor` broadcaster, session-vs-all-time stats, the CLI dispatch, and inline docs landed since), still no dependencies beyond Node built-ins. The control surface (`cachectl-a.sh`), the cross-platform Node control CLI (`cli.mjs`, exposed as the `llm-cache-proxy` bin so `npx llm-cache-proxy on` works), the cache explorer (`cache-explorer.mjs`), the benchmark (`bench.py`), and the fidelity test (`test-fidelity.mjs`) are equally direct.
 
 Strengths worth naming:
 
@@ -42,7 +42,7 @@ Strengths worth naming:
 - **Client-abort guard** (the `safe()` write wrapper plus `res 'close'` → `up.destroy()`). A mid-stream disconnect tears down the upstream call and cannot crash the process.
 - **Async I/O** (`fs/promises` throughout the hot path) so disk reads, writes, and the prune never block the event loop.
 - **Observability built in.** Per-request logs (`HIT`/`MISS`/`ERROR`/`DEBUG`) carry model, tokens, dollars, and latency, gated by `CACHE_LOG_LEVEL` and tee'd to a default log file. `GET /stats` reports **this-session and all-time** counters (priced per model, seeded from the metrics log on boot), `GET /metrics` exposes Prometheus, and `GET /monitor` is a realtime SSE feed of every served call. `cachectl-a.sh status` adds an operational snapshot (process, liveness, last call, errors this run).
-- **Operability.** A first-run `setup` wizard writes a chmod-600 `.env`; `install`/`uninstall` register a boot service with restart-on-failure (systemd user unit on Linux, launchd agent on macOS); a `cache-explorer.mjs` TUI browses and invalidates entries (with scriptable `--list`/`--json`/`--view`/`--invalidate`).
+- **Operability.** A first-run `setup` wizard writes a chmod-600 `.env`; `install`/`uninstall` register a boot service with restart-on-failure (systemd user unit on Linux, launchd agent on macOS); a `cache-explorer.mjs` TUI browses and invalidates entries (with scriptable `--list`/`--json`/`--view`/`--invalidate`). `cachectl-a.sh -h|--help|-?` — or any unknown/empty command — opens the full **USAGE.md** guide, paged through `less -R` on a TTY and falling back to a one-liner if the file is absent. The control script is also `set -u`-safe under macOS's stock bash 3.2 (the auth-header array no longer trips "unbound variable").
 - **Callable/testable routines.** `node proxy-a.mjs stats|price|usage|key` runs the core functions from the shell; the same functions are exported for import.
 - **Clear guardrails.** A global bypass (`CACHE_OFF`) and a per-request `x-cache-bypass` header, a 7-day TTL, and a throttled LRU prune.
 
@@ -117,7 +117,7 @@ In priority order:
 | Dimension | Rating | Note |
 |---|---|---|
 | Fit for stated purpose | Excellent | Exact-match rerun/eval/CI caching, done right |
-| Code clarity | Excellent | ~440 lines, zero deps, readable in one sitting; heavily commented |
+| Code clarity | Excellent | ~370 lines, zero deps, readable in one sitting; heavily commented |
 | Correctness (non-streaming) | Strong | Complete-200-only, fail-open, byte-exact |
 | Correctness (streaming/tool_use) | Proven | Byte-exact replay verified live (23/23) + multi-chunk SSE covered in the unit suite |
 | Robustness under concurrency | Strong | Async I/O, coalescing (1 upstream call per burst, proven), abort guard, throttled prune |
@@ -125,11 +125,11 @@ In priority order:
 | Observability | Strong | Structured logs + verbosity, `/stats` (session + all-time), `/metrics`, realtime `/monitor`, `status` |
 | Operability | Strong | First-run setup, boot-service install (systemd/launchd), cache-explorer TUI, CLI |
 | Security (single-user) | Good | Loopback default + token-gated exposure; plaintext at rest; clean secret hygiene |
-| Documentation | Strong | Honest scope, measured numbers, preserved decision record |
+| Documentation | Strong | Honest scope, measured numbers, preserved decision record; README + USAGE.md + INSTALL/ARCHITECTURE docs, with `-h` wired to the guide |
 
 ## Appendix: install & use
 
-Single user, macOS or Linux. Needs **Node ≥ 18** to run the proxy (the unit suite needs **Node ≥ 22** for built-in coverage) and a real Anthropic key. No build step, no `npm install`. Full guide: `docs/INSTALL.md`.
+Single user, macOS or Linux. Needs **Node ≥ 18** to run the proxy (the unit suite needs **Node ≥ 22** for built-in coverage) and a real Anthropic key. No build step, no `npm install`. Full guides: `USAGE.md` (commands, env, endpoints, examples) and `docs/INSTALL.md`.
 
 ```bash
 git clone https://github.com/mithudso/llm-cache-proxy.git && cd llm-cache-proxy
@@ -140,7 +140,7 @@ export ANTHROPIC_API_KEY=anything                           # client key ignored
 ```
 
 Operate: `./cachectl-a.sh on | off | stop | stats | status | monitor | explore | setup | run | install | uninstall`
-(`off` = bypass). Verify with `npm test` (zero-dep unit suite, 100% line/function coverage, no paid calls)
+(`off` = bypass; `-h`/`--help` opens the full **USAGE.md** guide). Verify with `npm test` (zero-dep unit suite, 100% line/function coverage, no paid calls)
 and `npm run test:fidelity` (live paid proof, expects 23/23); inspect with `curl localhost:4000/stats`
 (this-session + all-time) and `./cachectl-a.sh monitor` (realtime). Configuration is via env vars
 (`CACHE_PORT`, `CACHE_HOST`, `CACHE_AUTH_TOKEN`, `CACHE_TTL_SEC`, `CACHE_MAX_ENTRIES`, `CACHE_LOG_LEVEL`,

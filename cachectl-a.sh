@@ -223,11 +223,11 @@ case "${1:-}" in
 
     # 5) errors + logs emitted since this process started (proxy.log is truncated on each start)
     if [ -f "$LOGFILE" ]; then
-      errs=$(grep -c '^ERR' "$LOGFILE" 2>/dev/null || true); errs=${errs:-0}
+      errs=$(grep -c ' ERR ' "$LOGFILE" 2>/dev/null || true); errs=${errs:-0}
       echo "errors this run: $errs"
       if [ "$errs" -gt 0 ]; then
         echo "  -- recent errors --"
-        grep '^ERR' "$LOGFILE" | tail -n 5 | sed 's/^/  /'
+        grep ' ERR ' "$LOGFILE" | tail -n 5 | sed 's/^/  /'
       fi
       echo "  -- recent log (last 15 lines of $LOGFILE) --"
       tail -n 15 "$LOGFILE" | sed 's/^/  /'
@@ -246,7 +246,15 @@ case "${1:-}" in
             const t = new Date(e.t).toISOString().slice(11, 19);
             const tok = (e.in || 0) + (e.out || 0);
             const usd = e.usd != null ? `  $${(+e.usd).toFixed(5)}` : "";
-            console.log(`  ${t}  ${String(e.type).padEnd(15)} ${String(e.model || "?").slice(0, 30).padEnd(30)} ${tok}tok${usd}`);
+            // hit vs non-hit, plus whether the call landed in the cache
+            let label;
+            if (e.from_cache)              label = e.type === "HIT-COALESCED" ? "HIT (coalesced)"   : "HIT (from cache)";
+            else if (e.type === "ERROR")  label = "ERROR";
+            else if (e.type === "MISS-COALESCED") label = "non-hit (coalesced)";
+            else                          label = e.stored ? "non-hit (cached)" : "non-hit (not cached)";
+            const model = String(e.model || "?").slice(0, 30).padEnd(30);
+            const err = e.err ? `  ${e.err}` : "";
+            console.log(`  ${t}  ${label.padEnd(22)} ${model} ${tok}tok${usd}${err}`);
           });' ;;
       esac
     done ;;
