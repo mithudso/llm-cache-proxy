@@ -1,0 +1,101 @@
+name: token-expiry-check
+# Lightweight scheduled guard: warns before the release-automation tokens lapse.
+#
+# - HOMEBREW_TAP_TOKEN (GitHub fine-grained PAT): GitHub returns the exact expiry
+#   in the `github-authentication-token-expiration` response header, so we warn
+#   THRESHOLD_DAYS ahead.
+# - NPM_TOKEN (npm Automation token): npm exposes no expiry; Automation tokens are
+#   long-lived, so this is a liveness check (catches expiry/revocation when it hits).
+#
+# The job FAILS when a token is missing, invalid, or near expiry — a failed
+# *scheduled* run emails the workflow's last editor, which is the warning channel.
+# Trigger manually anytime via the Actions tab ("Run workflow") or `gh workflow run`.
+on:
+  schedule:
+    - cron: '0 9 * * 1'   # Mondays 09:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      THRESHOLD_DAYS: '14'
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - name: Check token expiry / validity
+        run: |
+          set -uo pipefail
+          THRESHOLD="${THRESHOLD_DAYS:-14}"
+          FAIL=0
+          {
+            echo "### Token expiry / validity report"
+            echo ""
+            echo "Threshold: warn at **${THRESHOLD} days** remaining."
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # --- GitHub fine-grained PAT: real expiry date ---
+          if [ -n "${HOMEBREW_TAP_TOKEN:-}" ]; then
+            code=$(curl -sS -o /dev/null -D /tmp/gh_h.txt -w '%{http_code}' \
+              -H "Authorization: Bearer $HOMEBREW_TAP_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/user || echo 000)
+            if [ "$code" != "200" ]; then
+              echo "::error::HOMEBREW_TAP_TOKEN invalid or revoked (HTTP $code)"
+              echo "- ❌ **HOMEBREW_TAP_TOKEN**: invalid/revoked (HTTP $code)" >> "$GITHUB_STEP_SUMMARY"
+              FAIL=1
+            else
+              exp=$(tr -d '\r' < /tmp/gh_h.txt | awk -F': ' 'tolower($1)=="github-authentication-token-expiration"{ $1=""; sub(/^ +/,""); print }')
+              if [ -z "$exp" ]; then
+                echo "- ⚠️ **HOMEBREW_TAP_TOKEN**: valid, but no expiry reported (non-expiring?)" >> "$GITHUB_STEP_SUMMARY"
+              else
+                exp_epoch=$(date -d "$exp" +%s 2>/dev/null || echo 0)
+                now=$(date +%s)
+                days=$(( (exp_epoch - now) / 86400 ))
+                if [ "$exp_epoch" -eq 0 ]; then
+                  echo "- ⚠️ **HOMEBREW_TAP_TOKEN**: could not parse expiry '$exp'" >> "$GITHUB_STEP_SUMMARY"
+                elif [ "$days" -lt 0 ]; then
+                  echo "::error::HOMEBREW_TAP_TOKEN expired ($exp)"
+                  echo "- ❌ **HOMEBREW_TAP_TOKEN**: EXPIRED ($exp)" >> "$GITHUB_STEP_SUMMARY"
+                  FAIL=1
+                elif [ "$days" -le "$THRESHOLD" ]; then
+                  echo "::warning::HOMEBREW_TAP_TOKEN expires in $days day(s) on $exp"
+                  echo "- ⚠️ **HOMEBREW_TAP_TOKEN**: expires in **$days day(s)** ($exp)" >> "$GITHUB_STEP_SUMMARY"
+                  FAIL=1
+                else
+                  echo "- ✅ **HOMEBREW_TAP_TOKEN**: $days days left ($exp)" >> "$GITHUB_STEP_SUMMARY"
+                fi
+              fi
+            fi
+          else
+            echo "::warning::HOMEBREW_TAP_TOKEN not set"
+            echo "- ⚠️ **HOMEBREW_TAP_TOKEN**: not set" >> "$GITHUB_STEP_SUMMARY"
+            FAIL=1
+          fi
+
+          # --- npm token: liveness (no expiry exposed) ---
+          if [ -n "${NPM_TOKEN:-}" ]; then
+            printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$HOME/.npmrc"
+            if who=$(npm whoami 2>/dev/null); then
+              echo "- ✅ **NPM_TOKEN**: valid (npm user: $who)" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::error::NPM_TOKEN invalid or expired (npm whoami failed)"
+              echo "- ❌ **NPM_TOKEN**: invalid/expired" >> "$GITHUB_STEP_SUMMARY"
+              FAIL=1
+            fi
+            rm -f "$HOME/.npmrc"
+          else
+            echo "::warning::NPM_TOKEN not set"
+            echo "- ⚠️ **NPM_TOKEN**: not set" >> "$GITHUB_STEP_SUMMARY"
+            FAIL=1
+          fi
+
+          if [ "$FAIL" -ne 0 ]; then
+            echo "One or more tokens need attention — see the annotations and the job summary above."
+            exit 1
+          fi
+          echo "All release-automation tokens healthy."

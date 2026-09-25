@@ -1,3 +1,9 @@
+# Semantic Indexing Rule
+- Do NOT use `view_file` to blindly explore large files.
+- ALWAYS use the `search_codebase` MCP tool (local semantic index) first to pull semantic chunks.
+- If the index does not exist, build it using `scripts/semantic_indexer.py`.
+- If the MCP server is not running or fails, attempt to start it. If it still fails, only then fallback to `view_file`.
+
 # CLAUDE.md — llm-cache-proxy
 
 Local-only, zero-dependency caching reverse proxy for the Anthropic Messages API
@@ -5,16 +11,21 @@ Local-only, zero-dependency caching reverse proxy for the Anthropic Messages API
 response with **no upstream call** → 100% token save per hit. Built for
 rerun/eval/CI/dev-loop workloads (high full-call repeat rate).
 
-## Canonical implementation
-- `proxy-a.mjs` — the proxy (Node, **zero dependencies**: `node:http/https/crypto/fs`).
-- `cachectl-a.sh` — control: `on` | `off` (bypass) | `stop` | `stats`.
-- `bench.py` — measures savings (needs `pip install anthropic`; not required to run the proxy).
+## Working agreement
+The owner prefers a **proactive** agent. Carry out recommended, in-scope, non-destructive
+follow-up actions **without waiting for confirmation**, and keep going through any further
+recommendations until none remain — don't end a turn with "I can do X if you'd like."
+Reserve ask-first only for genuinely destructive or irreversible actions: `git push`,
+committing, dependency installs, deleting files, deploys, or changing ticket/branch state.
+Summarize what you did at the end.
 
-## Deprecated (do not extend)
-`config.yaml`, `config.nocache.yaml`, `callback.py`, `cachectl.sh`, `requirements.txt`
-are the abandoned LiteLLM attempt, kept for history. LiteLLM was dropped: ~87s import,
->120s flaky startup, the `/v1/messages` passthrough route bypassed the cache, and
-master_key+wildcard routing required a Prisma DB. See docs/ARCHITECTURE.md.
+## Canonical implementation
+- `proxy-a.mjs` — the proxy (Node, **zero dependencies**: `node:http/https/crypto/fs`); package `main`, and host of the `node proxy-a.mjs <cmd>` routines (below).
+- `cli.mjs` — the **installed** entrypoint (`bin: llm-cache-proxy`); a cross-platform Node port of `cachectl-a.sh` (`on`|`off`|`stop`|`stats`|`setup`) that spawns `proxy-a.mjs`. This is how npm/Homebrew installs are driven (`.env` search: `~/.llm-cache-a/.env` then `./.env`).
+- `cachectl-a.sh` — the **source-checkout** control surface (full verb list below); the shell counterpart to `cli.mjs`.
+- `cache-explorer.mjs` — standalone cache-explorer TUI behind the `explore` verb; a user tool, **not** loaded by the proxy itself.
+- `bench.py` — measures savings (needs `pip install anthropic`; not required to run the proxy).
+- `test-helpers.mjs` — shared harness for the `proxy*.test.mjs` suite (see Concurrency & tests).
 
 ## Run
 ```bash
