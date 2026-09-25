@@ -1,0 +1,15 @@
+<!-- Generated 2026-09-25 [gen: p/2.0.0]; verified-as-of 2026-09-25 -->
+
+# llm-cache-proxy (small)
+
+> Local-only, zero-dependency caching reverse proxy for the Anthropic Messages API. On an exact-match repeat it replays the byte-identical cached response with no upstream call, for rerun, eval, CI and dev-loop workloads.
+
+## Essentials
+
+- Start: llm-cache-proxy on (npm/Homebrew) or ./cachectl-a.sh on (source)
+- Point clients: export ANTHROPIC_BASE_URL=http://localhost:4000
+- Verbs: on | off | restart | stop | stats | setup | validate (source adds status, monitor, explore, run, install, uninstall)
+- Tests: npm test (Node 22+ for coverage); proxy runs on Node 18+
+- Only exact full-call repeats hit by default; optional normalize.json enables HIT-NORM and HIT-SUFFIX
+
+See llms.txt for the index and llms-facts.txt for sourced facts.

@@ -1,0 +1,25 @@
+<!-- Generated 2026-09-25 [gen: p/2.0.0]; verified-as-of 2026-09-25 -->
+
+# llm-cache-proxy: Sourced Project Facts
+
+One declarative fact per line, each with a `[src:]` tag.
+
+## 2026-09-25 [gen: manual]
+
+- llm-cache-proxy is a local-only, zero-dependency caching reverse proxy for the Anthropic Messages API (/v1/messages) [src: CLAUDE.md]
+- On an exact-match repeat the proxy replays the byte-identical cached response with no upstream call [src: README.md]
+- The proxy is one Node file, proxy-a.mjs, using only node:http, node:https, node:crypto and node:fs [src: CLAUDE.md]
+- The proxy runs on Node 18 or newer; the test suite needs Node 22 or newer for built-in coverage [src: CLAUDE.md]
+- The default listen port is 4000 (CACHE_PORT) and the default host is <host> (CACHE_HOST) [src: CLAUDE.md]
+- Default cache TTL is 604800 seconds (CACHE_TTL_SEC) and default maximum entries is 5000 (CACHE_MAX_ENTRIES) [src: CLAUDE.md]
+- Binding a non-loopback host requires CACHE_AUTH_TOKEN; start() refuses otherwise and clients must send the x-cache-auth header [src: CLAUDE.md]
+- The real Anthropic key lives only in a gitignored, chmod 600 .env and must never be written into a tracked file [src: CLAUDE.md]
+- The installed entrypoint cli.mjs (bin: llm-cache-proxy) is a Node port of cachectl-a.sh supporting on, off, stop, stats and setup [src: CLAUDE.md]
+- The proxy exposes GET /stats (session and all-time JSON), GET /metrics (Prometheus) and GET /monitor (live SSE) [src: CLAUDE.md]
+- Cache store and metrics live in ~/.llm-cache-a/ outside the repository [src: CLAUDE.md]
+- npm test enforces 100% line and 100% function coverage of proxy-a.mjs with a mock upstream and no network [src: CLAUDE.md]
+- npm run test:fidelity runs test-fidelity.mjs, which is live and paid and needs the proxy up plus a real key [src: CLAUDE.md]
+- In the README benchmark, 5 identical Haiku calls gave an 80% hit rate, 1 upstream call, and warm-call latency of 0.001 s versus 1.141 s [src: README.md]
+- Optional normalize.json strips volatile fields before hashing to produce HIT-NORM hits; HIT-SUFFIX keys on only the last N messages and is higher risk [src: README.md]
+- The proxy coalesces identical in-flight requests to avoid a stampede [src: CLAUDE.md]
+- The package is installable via Homebrew (mithudso/tap/llm-cache-proxy), npm, or a git clone [src: README.md]
