@@ -5,6 +5,14 @@ Cut Anthropic API token spend on repeated identical calls (reruns, evals, CI, de
 loops). A local reverse proxy in front of `api.anthropic.com` that replays cached
 responses with zero upstream calls on exact-match repeats.
 
+## Components
+- `proxy-a.mjs` — the proxy itself (Node, zero deps); package `main`, and host of the `node proxy-a.mjs <cmd>` routines (`stats`/`price`/`usage`/`key`).
+- `cli.mjs` — the **installed** entrypoint (`bin: llm-cache-proxy`); a cross-platform Node port of `cachectl-a.sh` (`on`/`off`/`stop`/`stats`/`setup`) that spawns `proxy-a.mjs`. Drives npm/Homebrew installs (`.env` search: `~/.llm-cache-a/.env` then `./.env`).
+- `cachectl-a.sh` — the **source-checkout** control surface; the shell counterpart to `cli.mjs`.
+- `cache-explorer.mjs` — standalone cache-explorer TUI behind the `explore` verb; a user tool, **not** loaded by the proxy.
+- `bench.py` — measures savings (needs `pip install anthropic`; not required to run the proxy).
+- `test-helpers.mjs` — shared harness for the `proxy*.test.mjs` suite.
+
 ## Flow
 ```
 Client (Claude Code / SDK) ──/v1/messages──▶ proxy-a.mjs (localhost:4000)

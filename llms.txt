@@ -1,0 +1,30 @@
+<!-- Generated 2026-09-25 [gen: p/2.0.0]; verified-as-of 2026-09-25 -->
+
+# llm-cache-proxy
+
+> Local-only, zero-dependency caching reverse proxy for the Anthropic Messages API. On an exact-match repeat it replays the byte-identical cached response with no upstream call, for rerun, eval, CI and dev-loop workloads.
+
+## Docs
+
+- [README.md](README.md): Overview, measured savings, install, control surface
+- [USAGE.md](USAGE.md): Usage guide
+- [CLAUDE.md](CLAUDE.md): Canonical implementation, config, security, tests
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): Architecture
+- [docs/INSTALL.md](docs/INSTALL.md): Install
+- [llm-cache-proxy-tech-review.md](llm-cache-proxy-tech-review.md): Technical review
+
+## Key files
+
+- [proxy-a.mjs](proxy-a.mjs): The proxy (Node, zero dependencies)
+- [cli.mjs](cli.mjs): Installed entrypoint (bin: llm-cache-proxy)
+- [cachectl-a.sh](cachectl-a.sh): Source-checkout control surface
+- [cache-explorer.mjs](cache-explorer.mjs): Cache explorer TUI
+- [bench.py](bench.py): Savings benchmark (needs the anthropic package)
+- [test-helpers.mjs](test-helpers.mjs): Shared harness for the proxy*.test.mjs suite
+- [test-fidelity.mjs](test-fidelity.mjs): Live, paid byte-exact replay proof
+
+## Companion files
+
+- [llms-full.txt](llms-full.txt): concatenated key docs
+- [llms-small.txt](llms-small.txt): condensed summary
+- [llms-facts.txt](llms-facts.txt): sourced one-line facts

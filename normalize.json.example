@@ -1,0 +1,13 @@
+{
+  "system_strip": [
+    "Current date[^\\n]*",
+    "Today(?:'s date| is)[^\\n]*",
+    "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+    "Session[- ]?[Ii][Dd][:\\s]+[A-Za-z0-9_=-]+"
+  ],
+  "message_strip": [
+    "<tool_result>[\\s\\S]*?</tool_result>"
+  ],
+  "suffix_only": false,
+  "suffix_turns": 3
+}
