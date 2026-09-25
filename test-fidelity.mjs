@@ -17,7 +17,8 @@ const NONCE = `${Date.now()}-${Math.floor(Math.random() * 1e9)}`;  // unique per
 const TOOLS = [{ name: 'get_weather', description: 'Get the weather for a city', input_schema: { type: 'object', properties: { city: { type: 'string' } }, required: ['city'] } }];
 
 let pass = 0, fail = 0;
-const ok = (cond, msg) => { (cond ? pass++ : fail++); console.log(`  ${cond ? 'PASS' : 'FAIL'}  ${msg}`); };
+// ok() writes into a per-scenario sink so concurrent scenarios print as clean, grouped blocks
+const makeOk = (sink) => (cond, msg) => { (cond ? pass++ : fail++); sink.push(`  ${cond ? 'PASS' : 'FAIL'}  ${msg}`); };
 
 function post(body) {
   return new Promise((resolve, reject) => {
@@ -30,10 +31,24 @@ function post(body) {
   });
 }
 
+// cheap reachability probe: GET /health never calls upstream (vs a real POST that burns a live call)
+function get(path) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port: PORT, path, method: 'GET' },
+      (r) => { r.resume(); r.on('end', () => resolve(r.statusCode)); });
+    req.on('error', reject); req.end();
+  });
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Returns the scenario's buffered log lines so independent scenarios can run concurrently and
+// still print as ordered, grouped blocks. Behaviour-identical: warm call is served from cache via
+// the disk-HIT path, or the inflight-coalesce path until the disk write commits (proxy-a.mjs:141,160-180)
+// — so it can never MISS regardless of the settle window or concurrent disk/CPU contention.
 async function coldWarm(name, body, checks) {
-  console.log(`\n# ${name}`);
+  const lines = [`\n# ${name}`];
+  const ok = makeOk(lines);
   const a = await post(body);
   await sleep(150);                                 // let the cold call's disk write + inflight cleanup settle
   const b = await post(body);                       // identical -> must be served from cache, no upstream
@@ -41,46 +56,55 @@ async function coldWarm(name, body, checks) {
   ok(a.xcache === 'MISS', `cold is a MISS (got ${a.xcache})`);
   ok(b.xcache === 'HIT' || b.xcache === 'HIT-COALESCED', `warm served from cache, no upstream (got ${b.xcache})`);
   ok(a.buf.equals(b.buf), `replay is BYTE-IDENTICAL (${a.buf.length} vs ${b.buf.length} bytes)`);
-  checks(a.buf.toString('utf8'));
+  checks(a.buf.toString('utf8'), ok);
+  return lines;
 }
 
 async function main() {
-  // 0. proxy reachable?
-  await post({ model: MODEL, max_tokens: 8, messages: [{ role: 'user', content: 'ping ' + NONCE }] })
+  // 0. proxy reachable? cheap GET /health — no upstream call burned (vs a wasted live POST)
+  await get('/health')
     .catch((e) => { console.error('proxy not reachable on :' + PORT + ' — start it with ./cachectl-a.sh on'); throw e; });
 
-  // 1. streaming text
-  await coldWarm('1. streaming SSE', {
-    model: MODEL, max_tokens: 64, stream: true,
-    messages: [{ role: 'user', content: `Count from 1 to 5. nonce=${NONCE}` }],
-  }, (t) => {
-    ok(t.includes('event: message_start'), 'SSE has message_start');
-    ok(t.includes('content_block_delta'), 'SSE has content_block_delta');
-    ok(t.includes('message_stop'), 'SSE has message_stop (complete stream)');
-  });
+  // 1–3 are independent (distinct cache keys) -> run concurrently; real-call latency dominates, so
+  // overlapping them collapses ~3x scenario latency into ~1x. Logs are buffered per scenario and
+  // flushed in order below so output stays grouped and deterministic.
+  const blocks = await Promise.all([
+    // 1. streaming text
+    coldWarm('1. streaming SSE', {
+      model: MODEL, max_tokens: 64, stream: true,
+      messages: [{ role: 'user', content: `Count from 1 to 5. nonce=${NONCE}` }],
+    }, (t, ok) => {
+      ok(t.includes('event: message_start'), 'SSE has message_start');
+      ok(t.includes('content_block_delta'), 'SSE has content_block_delta');
+      ok(t.includes('message_stop'), 'SSE has message_stop (complete stream)');
+    }),
 
-  // 2. tool_use (non-streaming JSON)
-  await coldWarm('2. tool_use (JSON)', {
-    model: MODEL, max_tokens: 256, tools: TOOLS, tool_choice: { type: 'any' },
-    messages: [{ role: 'user', content: `What is the weather in Paris? nonce=${NONCE}` }],
-  }, (t) => {
-    let j = {}; try { j = JSON.parse(t); } catch {}
-    ok(j.stop_reason === 'tool_use', `stop_reason is tool_use (got ${j.stop_reason})`);
-    ok(Array.isArray(j.content) && j.content.some((b) => b.type === 'tool_use'), 'response has a tool_use content block');
-  });
+    // 2. tool_use (non-streaming JSON)
+    coldWarm('2. tool_use (JSON)', {
+      model: MODEL, max_tokens: 256, tools: TOOLS, tool_choice: { type: 'any' },
+      messages: [{ role: 'user', content: `What is the weather in Paris? nonce=${NONCE}` }],
+    }, (t, ok) => {
+      let j = {}; try { j = JSON.parse(t); } catch {}
+      ok(j.stop_reason === 'tool_use', `stop_reason is tool_use (got ${j.stop_reason})`);
+      ok(Array.isArray(j.content) && j.content.some((b) => b.type === 'tool_use'), 'response has a tool_use content block');
+    }),
 
-  // 3. streaming + tool_use (the hard case)
-  await coldWarm('3. streaming + tool_use', {
-    model: MODEL, max_tokens: 256, stream: true, tools: TOOLS, tool_choice: { type: 'any' },
-    messages: [{ role: 'user', content: `Weather in Tokyo? nonce=${NONCE}` }],
-  }, (t) => {
-    ok(t.includes('"type":"tool_use"'), 'SSE contains a tool_use content block');
-    ok(t.includes('input_json_delta'), 'SSE streams tool input via input_json_delta');
-    ok(t.includes('message_stop'), 'SSE has message_stop (complete stream)');
-  });
+    // 3. streaming + tool_use (the hard case)
+    coldWarm('3. streaming + tool_use', {
+      model: MODEL, max_tokens: 256, stream: true, tools: TOOLS, tool_choice: { type: 'any' },
+      messages: [{ role: 'user', content: `Weather in Tokyo? nonce=${NONCE}` }],
+    }, (t, ok) => {
+      ok(t.includes('"type":"tool_use"'), 'SSE contains a tool_use content block');
+      ok(t.includes('input_json_delta'), 'SSE streams tool input via input_json_delta');
+      ok(t.includes('message_stop'), 'SSE has message_stop (complete stream)');
+    }),
+  ]);
+  blocks.forEach((b) => console.log(b.join('\n')));
 
-  // 4. coalescing: a burst of identical calls -> exactly ONE upstream MISS
-  console.log('\n# 4. coalescing under a burst (6 identical, parallel)');
+  // 4. coalescing: a burst of identical calls -> exactly ONE upstream MISS. Kept sequential after
+  // 1–3 so its single-MISS assertion reasons over its own key with no cross-scenario traffic.
+  const lines4 = ['\n# 4. coalescing under a burst (6 identical, parallel)'];
+  const ok = makeOk(lines4);
   const burstBody = { model: MODEL, max_tokens: 32, messages: [{ role: 'user', content: `Say hi. burst=${NONCE}` }] };
   const N = 6;
   const results = await Promise.all(Array.from({ length: N }, () => post(burstBody)));
@@ -89,6 +113,7 @@ async function main() {
   ok(misses === 1, `exactly 1 upstream call for ${N} identical concurrent requests (got ${misses} MISS)`);
   ok(served === N - 1, `${N - 1} requests coalesced/served from cache (got ${served})`);
   ok(results.every((r) => r.buf.equals(results[0].buf)), 'all burst responses byte-identical');
+  console.log(lines4.join('\n'));
 
   console.log(`\n==== ${fail === 0 ? 'ALL PASS' : 'FAILURES'} : ${pass} passed, ${fail} failed ====`);
   process.exit(fail === 0 ? 0 : 1);
