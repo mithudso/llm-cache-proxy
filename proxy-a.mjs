@@ -116,8 +116,9 @@ const metric = (o) => { fsp.appendFile(METRICS, JSON.stringify({ t: Date.now(), 
 // Emit a log line at the given level (default info) to stdout + the log file, if verbosity allows.
 const log = (s, level = LOG_LEVELS.info) => {
   if (level > LOG_LEVEL) return;
-  process.stdout.write(s + '\n');
-  if (LOG_FILE) fsp.appendFile(LOG_FILE, s + '\n').catch(noop);
+  const line = `${new Date().toISOString()}  ${s}`;   // timestamp every line (stdout + file + status tail)
+  process.stdout.write(line + '\n');
+  if (LOG_FILE) fsp.appendFile(LOG_FILE, line + '\n').catch(noop);
 };
 const hitRate = () => c.calls ? (100 * c.hits / c.calls) : 0;
 
