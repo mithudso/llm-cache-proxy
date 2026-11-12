@@ -1,0 +1,774 @@
+[
+  {
+    "path": ".aider.conf.yml",
+    "purpose": "Project configuration or reference asset.",
+    "layer": "config",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": ".editorconfig",
+    "purpose": "Project configuration or reference asset.",
+    "layer": "config",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": ".gitattributes",
+    "purpose": "Project configuration or reference asset.",
+    "layer": "config",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": ".github/CODEOWNERS",
+    "purpose": "Project configuration or reference asset.",
+    "layer": "config",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": ".github/FUNDING.yml",
+    "purpose": "Project configuration or reference asset.",
+    "layer": "config",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": ".github/ISSUE_TEMPLATE/bug_report.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": ".github/ISSUE_TEMPLATE/feature_request.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": ".github/PULL_REQUEST_TEMPLATE.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": ".github/SECURITY.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": ".github/dependabot.yml",
+    "purpose": "Project configuration or reference asset.",
+    "layer": "config",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "purpose": "Project configuration or reference asset.",
+    "layer": "config",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": ".github/workflows/homebrew.yml",
+    "purpose": "Project configuration or reference asset.",
+    "layer": "config",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": ".github/workflows/token-expiry-check.yml",
+    "purpose": "Project configuration or reference asset.",
+    "layer": "config",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": ".gitignore",
+    "purpose": "Project configuration or reference asset.",
+    "layer": "config",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": ".mcp.json",
+    "purpose": "Project configuration or reference asset.",
+    "layer": "config",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": ".nvmrc",
+    "purpose": "Project configuration or reference asset.",
+    "layer": "config",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "CODE_OF_CONDUCT.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "CONTRIBUTING.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "LICENSE",
+    "purpose": "Project configuration or reference asset.",
+    "layer": "runtime",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "README.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "USAGE.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "bench.py",
+    "purpose": "Live paid cache benchmark using response classification.",
+    "layer": "runtime",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "bench_test.py",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "cache-explorer.mjs",
+    "purpose": "Local cache list, view, invalidate and terminal UI.",
+    "layer": "runtime",
+    "exports": [
+      "listEntries",
+      "invalidate"
+    ],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "cache-explorer.test.mjs",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "cachectl-a.sh",
+    "purpose": "Source controller and explicit user service integration.",
+    "layer": "runtime",
+    "exports": [],
+    "depends_on": [
+      "lib/proxy-validation.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "cachectl.test.mjs",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "cli.mjs",
+    "purpose": "Installed local controller and setup wizard.",
+    "layer": "runtime",
+    "exports": [],
+    "depends_on": [
+      "lib/controller.mjs",
+      "lib/proxy-validation.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "cli.test.mjs",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [
+      "lib/controller.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "doc-tools.test.mjs",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [
+      "scripts/generate-doc-indexes.mjs",
+      "scripts/generate-ops-registry-doc.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "docs/ARCHITECTURE.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "docs/COMPONENTS.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [
+      "lib/controller.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "docs/DEVELOPMENT.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "docs/INSTALL.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "docs/INSTALLATION.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "docs/MCP.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "docs/SECURITY.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "docs/TESTING.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "docs/caching-and-optimization.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "docs/external-calls.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "docs/integrations-and-assumptions.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "docs/known-issues.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "docs/logging.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "docs/onboarding.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "docs/operations-registry.json",
+    "purpose": "Project configuration or reference asset.",
+    "layer": "config",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "docs/requirements.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "docs/runbooks/operations.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "docs/tool-inventory.json",
+    "purpose": "Project configuration or reference asset.",
+    "layer": "config",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "docs/wiki/README.md",
+    "purpose": "Maintained project reference.",
+    "layer": "docs",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "fidelity-local.test.mjs",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [
+      "test-helpers.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "lib/controller.mjs",
+    "purpose": "Safe dotenv, HTTP probe and process ownership helpers.",
+    "layer": "shared",
+    "exports": [
+      "parseEnvText",
+      "serializeEnv",
+      "loadEnvFile",
+      "writeEnvFile",
+      "readControllerConfig",
+      "requestLocal",
+      "readProxyPid",
+      "processCommand",
+      "isProxyCommand",
+      "stopProxy"
+    ],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "lib/operations-registry.mjs",
+    "purpose": "Declarative external-call inventory.",
+    "layer": "shared",
+    "exports": [
+      "operations"
+    ],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "lib/proxy-config.mjs",
+    "purpose": "Validated startup limits.",
+    "layer": "shared",
+    "exports": [
+      "limits"
+    ],
+    "depends_on": [
+      "lib/proxy-validation.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "lib/proxy-validation.mjs",
+    "purpose": "Pure limits, pricing and normalization validators.",
+    "layer": "shared",
+    "exports": [
+      "readLimits",
+      "validatePrices",
+      "validateNormalization"
+    ],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "normalize.json.example",
+    "purpose": "Project configuration or reference asset.",
+    "layer": "config",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "package.json",
+    "purpose": "Project configuration or reference asset.",
+    "layer": "config",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "package.test.mjs",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "proxy-a.mjs",
+    "purpose": "Messages reverse proxy, byte replay, cache, statistics and monitoring.",
+    "layer": "runtime",
+    "exports": [
+      "requestHandler",
+      "createServer",
+      "start",
+      "usageFrom",
+      "priceFor",
+      "usd",
+      "statsObj"
+    ],
+    "depends_on": [
+      "lib/proxy-config.mjs",
+      "lib/proxy-validation.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "proxy-auth.test.mjs",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [
+      "test-helpers.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "proxy-bind.test.mjs",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [
+      "proxy-a.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "proxy-cacheoff.test.mjs",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [
+      "test-helpers.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "proxy-eviction-pricing.test.mjs",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [
+      "test-helpers.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "proxy-hardening.test.mjs",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [
+      "test-helpers.mjs",
+      "lib/proxy-validation.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "proxy-limits.test.mjs",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [
+      "test-helpers.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "proxy-logging.test.mjs",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [
+      "test-helpers.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "proxy-monitor.test.mjs",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [
+      "test-helpers.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "proxy-normalize-defaults.test.mjs",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [
+      "test-helpers.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "proxy-normalize.test.mjs",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [
+      "test-helpers.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "proxy-prices.test.mjs",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [
+      "test-helpers.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "proxy-prune.test.mjs",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [
+      "test-helpers.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "proxy-seed.test.mjs",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [
+      "test-helpers.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "proxy-stream-errors.test.mjs",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [
+      "test-helpers.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "proxy-suffix.test.mjs",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [
+      "test-helpers.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "proxy-verbosity.test.mjs",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [
+      "test-helpers.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "proxy.test.mjs",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [
+      "test-helpers.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "scripts/check-doc-indexes.mjs",
+    "purpose": "Repository maintenance entrypoint.",
+    "layer": "tooling",
+    "exports": [],
+    "depends_on": [
+      "scripts/generate-doc-indexes.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "scripts/check-source.mjs",
+    "purpose": "Repository maintenance entrypoint.",
+    "layer": "tooling",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "scripts/generate-doc-indexes.mjs",
+    "purpose": "Repository maintenance entrypoint.",
+    "layer": "tooling",
+    "exports": [
+      "isPublicPath",
+      "buildOutputs"
+    ],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "scripts/generate-ops-registry-doc.mjs",
+    "purpose": "Repository maintenance entrypoint.",
+    "layer": "tooling",
+    "exports": [
+      "extractRoutes"
+    ],
+    "depends_on": [
+      "lib/operations-registry.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "scripts/rotate-workflow-logs.mjs",
+    "purpose": "Repository maintenance entrypoint.",
+    "layer": "tooling",
+    "exports": [],
+    "depends_on": [],
+    "patterns": []
+  },
+  {
+    "path": "test-fidelity.mjs",
+    "purpose": "Explicit live paid fidelity proof.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [
+      "lib/controller.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "test-helpers.mjs",
+    "purpose": "Isolated local mock proxy harness.",
+    "layer": "test",
+    "exports": [
+      "sleep",
+      "waitFor",
+      "uniq",
+      "jsonResponder",
+      "boot",
+      "post",
+      "request",
+      "get"
+    ],
+    "depends_on": [
+      "proxy-a.mjs"
+    ],
+    "patterns": []
+  },
+  {
+    "path": "test-normalize-example.mjs",
+    "purpose": "Behavior regression fixture and assertions.",
+    "layer": "test",
+    "exports": [],
+    "depends_on": [
+      "test-helpers.mjs"
+    ],
+    "patterns": []
+  }
+]

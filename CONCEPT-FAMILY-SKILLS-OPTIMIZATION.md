@@ -1,3 +1,5 @@
+> Historical snapshot. Current commands and constraints are maintained in [the project wiki](docs/wiki/README.md). This maintenance run did not revalidate historical live results or machine integrations.
+
 # Concept Family Skills Optimization — 2026-06-25
 
 This document tracks the optimization and improvements made to the concept-family-explorer and skill-tree-architect skills.

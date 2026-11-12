@@ -1,0 +1,31 @@
+{
+  "totalRoutes": 5,
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/health",
+      "description": "Open liveness probe"
+    },
+    {
+      "method": "GET",
+      "path": "/stats",
+      "description": "Session and all-time counters"
+    },
+    {
+      "method": "GET",
+      "path": "/metrics",
+      "description": "Prometheus counters"
+    },
+    {
+      "method": "GET",
+      "path": "/monitor",
+      "description": "Live SSE events"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/messages",
+      "description": "Paid miss or byte-exact replay"
+    }
+  ],
+  "mcpTools": []
+}

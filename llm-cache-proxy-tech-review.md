@@ -1,3 +1,5 @@
+> Historical snapshot. Current commands and constraints are maintained in [the project wiki](docs/wiki/README.md). This maintenance run did not revalidate historical live results or machine integrations.
+
 # Technical Review: llm-cache-proxy
 
 This review evaluates **llm-cache-proxy**, a zero-dependency local caching proxy for the Anthropic Messages API. It is written for an engineer deciding whether to adopt the tool, extend it, or trust it on live agent traffic. It covers design, the implementation in `proxy-a.mjs`, the measured benchmark, observability, security posture, and the boundaries of where the tool earns its keep. It is not a usage guide (the README covers that) or a security audit.

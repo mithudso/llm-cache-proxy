@@ -41,7 +41,7 @@ test('MISS then HIT: byte-identical replay, no second upstream call', async () =
   assert.equal(a.status, 200);
   assert.equal(a.xcache, 'MISS');
   assert.equal(P.state.count, 1);
-  await sleep(60);
+  await P.waitForEntry(body);
   const b = await post(P.port, body);
   assert.equal(b.xcache, 'HIT');
   assert.equal(P.state.count, 1);             // no second upstream call
@@ -59,7 +59,7 @@ test('streaming SSE: complete stream (message_stop) is cached and replayed', asy
   const a = await post(P.port, body);
   assert.equal(a.xcache, 'MISS');
   assert.match(a.headers['content-type'], /event-stream/);
-  await sleep(60);
+  await P.waitForEntry(body);
   const b = await post(P.port, body);
   assert.equal(b.xcache, 'HIT');
   assert.equal(P.state.count, 1);
@@ -82,7 +82,7 @@ test('multi-chunk SSE: live MISS reassembles in order; HIT replays byte-identica
   const a = await post(P.port, body);
   assert.equal(a.xcache, 'MISS');
   assert.equal(a.buf.toString(), full);     // live MISS streamed every chunk, in order
-  await sleep(80);
+  await P.waitForEntry(body);
   const b = await post(P.port, body);
   assert.equal(b.xcache, 'HIT');
   assert.equal(P.state.count, 1);
@@ -113,7 +113,7 @@ test('non-200 upstream is forwarded and not cached', async () => {
 test('x-cache-bypass header forwards and skips the cache', async () => {
   const body = uniq();
   await post(P.port, body);            // warm
-  await sleep(60);
+  await P.waitForEntry(body);
   const b = await post(P.port, body, { 'x-cache-bypass': '1' });
   assert.equal(b.xcache, 'MISS');
   assert.equal(P.state.count, 2);
@@ -150,7 +150,7 @@ test('coalescing replays a non-200 result to waiters (MISS-COALESCED)', async ()
 test('expired entries (TTL elapsed) are treated as a miss', async () => {
   const body = uniq();
   assert.equal((await post(P.port, body)).xcache, 'MISS');
-  await sleep(60);
+  await P.waitForEntry(body);
   // age the entry past its TTL by rewriting the meta timestamp to the epoch
   const meta = path.join(P.dir, 'entries', keyOf(body) + '.json');
   const m = JSON.parse(fs.readFileSync(meta, 'utf8'));
@@ -179,7 +179,7 @@ test('upstream with no content-type header: replayed HIT falls back to applicati
   P.setResponder((req, res, b, st) => { st.count++; res.writeHead(200); res.end('{"ok":true}'); });
   const body = uniq();
   await post(P.port, body);            // cold MISS stores meta.contentType = fallback
-  await sleep(60);
+  await P.waitForEntry(body);
   const b = await post(P.port, body);  // warm HIT replays the stored fallback
   assert.equal(b.xcache, 'HIT');
   assert.equal(b.headers['content-type'], 'application/json');   // contentType || default

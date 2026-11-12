@@ -1,3 +1,5 @@
+> Historical snapshot. Current commands and constraints are maintained in [the project wiki](docs/wiki/README.md). This maintenance run did not revalidate historical live results or machine integrations.
+
 # MCP Servers Synchronization — 2026-06-25
 
 Successfully copied all MCP server configurations from Claude Code to Auggie.
