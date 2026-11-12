@@ -40,7 +40,7 @@ jobs:
           echo "tag=$TAG version=$VERSION sha256=$SHA"
 
       - name: Checkout the homebrew tap
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: mithudso/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
