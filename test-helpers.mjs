@@ -7,8 +7,16 @@ import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+export async function waitFor(predicate, timeout = 3000) {
+  const deadline = Date.now() + timeout;
+  while (!(await predicate())) {
+    if (Date.now() >= deadline) throw new Error('Timed out waiting for mock fixture state');
+    await sleep(5);
+  }
+}
 
 let n = 0;
 export const uniq = (extra = {}) =>
@@ -46,6 +54,8 @@ export async function boot({ responder = jsonResponder, env = {}, quiet = true, 
   const mock = mockUpstream(state);
   const upPort = await listen(mock);
 
+  // Developer shell settings must not change mock behavior or write into real logs.
+  for (const name of Object.keys(process.env)) if (name.startsWith('CACHE_')) delete process.env[name];
   process.env.HOME = home;
   process.env.ANTHROPIC_API_KEY_REAL = 'test-key';
   process.env.CACHE_UPSTREAM_PROTO = 'http';
@@ -65,6 +75,12 @@ export async function boot({ responder = jsonResponder, env = {}, quiet = true, 
     setResponder(fn) { state.responder = fn; },
     resetCount() { state.count = 0; },
     entries() { return fs.readdirSync(path.join(dir, 'entries')); },
+    async waitForEntry(body) {
+      const raw = Buffer.isBuffer(body) ? body : Buffer.from(typeof body === 'string' ? body : JSON.stringify(body));
+      let parsed = {}; try { parsed = JSON.parse(raw.toString()); } catch {}
+      const key = crypto.createHash('sha256').update((parsed.model || '') + '\n').update(raw).digest('hex');
+      await waitFor(() => fs.existsSync(path.join(dir, 'entries', key + '.json')));
+    },
     async close() {
       server.closeAllConnections?.();   // drop any lingering keep-alive/SSE (e.g. /monitor) sockets
       mock.closeAllConnections?.();
@@ -82,8 +98,9 @@ export function post(port, body, headers = {}) {
     const req = http.request(
       { host: '127.0.0.1', port, path: '/v1/messages', method: 'POST',
         headers: { 'content-type': 'application/json', 'content-length': data.length, ...headers } },
-      (r) => { const p = []; r.on('data', (c) => p.push(c)); r.on('end', () =>
+      (r) => { const p = []; r.on('error', reject); r.on('data', (c) => p.push(c)); r.on('end', () =>
         resolve({ status: r.statusCode, xcache: r.headers['x-cache'], buf: Buffer.concat(p), headers: r.headers })); });
+    req.setTimeout(5000, () => req.destroy(new Error('mock proxy request timed out')));
     req.on('error', reject); req.write(data); req.end();
   });
 }
@@ -91,8 +108,9 @@ export function post(port, body, headers = {}) {
 export function request(port, method, p) {
   return new Promise((resolve, reject) => {
     const req = http.request({ host: '127.0.0.1', port, path: p, method },
-      (r) => { const b = []; r.on('data', (c) => b.push(c)); r.on('end', () =>
+      (r) => { const b = []; r.on('error', reject); r.on('data', (c) => b.push(c)); r.on('end', () =>
         resolve({ status: r.statusCode, buf: Buffer.concat(b), headers: r.headers })); });
+    req.setTimeout(5000, () => req.destroy(new Error('mock proxy request timed out')));
     req.on('error', reject); req.end();
   });
 }

@@ -1,55 +1,51 @@
 name: ci
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+permissions:
+  contents: read
 jobs:
   check:
     runs-on: ubuntu-latest
-    env:
-      ANTHROPIC_API_KEY_REAL: ${{ secrets.ANTHROPIC_API_KEY_REAL }}
+    strategy:
+      matrix:
+        node: ['22', '24']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
-      - name: Node syntax check (proxy + test)
-        run: |
-          node --check proxy-a.mjs
-          node --check test-fidelity.mjs
-      # Live fidelity test runs only when a real key is configured as a repo secret.
-      - name: Fidelity test (live, optional — only if ANTHROPIC_API_KEY_REAL secret is set)
-        if: ${{ env.ANTHROPIC_API_KEY_REAL != '' }}
-        run: |
-          node proxy-a.mjs & sleep 1
-          node test-fidelity.mjs
-      - name: Shell syntax check
-        run: bash -n cachectl-a.sh
-      - name: Python syntax check (bench)
-        run: python3 -m py_compile bench.py
-
-  # Tag-triggered npm publish: runs only on a pushed v* tag, after `check` passes.
-  # Requires an npm "Automation" access token stored as the NPM_TOKEN repo secret
-  # (Automation tokens bypass 2FA/OTP). Set it with: gh secret set NPM_TOKEN
+          node-version: ${{ matrix.node }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: npm ci --ignore-scripts
+      - run: npm run validate
+      - run: npm audit --audit-level=moderate
+  runtime-18:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - run: node --test *.test.mjs
   publish:
-    needs: check
+    needs: [check, runtime-18]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write   # enables npm provenance attestation
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
-      - name: Verify the tag matches package.json version
-        run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          PKG="$(node -p "require('./package.json').version")"
-          echo "tag=$TAG package.json=$PKG"
-          test "$TAG" = "$PKG"
-      - name: Unit tests + coverage gate
-        run: npm test
-      - name: Publish to npm
-        run: npm publish --provenance --access public
+      - name: Verify tag matches package version
+        run: node -e 'if (process.env.GITHUB_REF_NAME !== "v" + require("./package.json").version) process.exit(1)'
+      - run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

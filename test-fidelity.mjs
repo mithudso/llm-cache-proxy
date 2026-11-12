@@ -10,8 +10,10 @@
 // Run:  node test-fidelity.mjs              (uses cheap haiku; ~6 real calls)
 //       node test-fidelity.mjs --model claude-sonnet-4-6
 import http from 'node:http';
+import { readControllerConfig } from './lib/controller.mjs';
 
-const PORT = +(process.env.CACHE_PORT || 4000);
+const CONFIG = readControllerConfig();
+const PORT = CONFIG.port;
 const MODEL = (() => { const i = process.argv.indexOf('--model'); return i > -1 ? process.argv[i + 1] : 'claude-haiku-4-5-20251001'; })();
 const NONCE = `${Date.now()}-${Math.floor(Math.random() * 1e9)}`;  // unique per run -> guarantees a cold first call
 const TOOLS = [{ name: 'get_weather', description: 'Get the weather for a city', input_schema: { type: 'object', properties: { city: { type: 'string' } }, required: ['city'] } }];
@@ -24,9 +26,11 @@ function post(body) {
   return new Promise((resolve, reject) => {
     const data = Buffer.from(JSON.stringify(body));
     const req = http.request({
-      host: '127.0.0.1', port: PORT, path: '/v1/messages', method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-api-key': 'test-client', 'anthropic-version': '2023-06-01', 'content-length': data.length },
-    }, (r) => { const parts = []; r.on('data', (c) => parts.push(c)); r.on('end', () => resolve({ status: r.statusCode, xcache: r.headers['x-cache'], buf: Buffer.concat(parts) })); });
+      host: CONFIG.requestHost, port: PORT, path: '/v1/messages', method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': 'test-client', 'anthropic-version': '2023-06-01', 'content-length': data.length, ...(CONFIG.token ? { 'x-cache-auth': CONFIG.token } : {}) },
+    }, (r) => { const parts = []; r.on('error', reject); r.on('data', (c) => parts.push(c)); r.on('end', () => resolve({ status: r.statusCode, xcache: r.headers['x-cache'], buf: Buffer.concat(parts) })); });
+    const timer = setTimeout(() => req.destroy(new Error('fidelity request deadline exceeded')), 125000);
+    req.once('close', () => clearTimeout(timer));
     req.on('error', reject); req.write(data); req.end();
   });
 }
@@ -34,8 +38,10 @@ function post(body) {
 // cheap reachability probe: GET /health never calls upstream (vs a real POST that burns a live call)
 function get(path) {
   return new Promise((resolve, reject) => {
-    const req = http.request({ host: '127.0.0.1', port: PORT, path, method: 'GET' },
-      (r) => { r.resume(); r.on('end', () => resolve(r.statusCode)); });
+    const req = http.request({ host: CONFIG.requestHost, port: PORT, path, method: 'GET' },
+      (r) => { r.on('error', reject); r.resume(); r.on('end', () => resolve(r.statusCode)); });
+    const timer = setTimeout(() => req.destroy(new Error('health probe deadline exceeded')), CONFIG.timeout);
+    req.once('close', () => clearTimeout(timer));
     req.on('error', reject); req.end();
   });
 }

@@ -1,73 +1,74 @@
-# Semantic Indexing Rule
-- Do NOT use `view_file` to blindly explore large files.
-- ALWAYS use the `search_codebase` MCP tool (local semantic index) first to pull semantic chunks.
-- If the index does not exist, build it using `scripts/semantic_indexer.py`.
-- If the MCP server is not running or fails, attempt to start it. If it still fails, only then fallback to `view_file`.
+# llm-cache-proxy contributor context
 
-# CLAUDE.md — llm-cache-proxy
+## Repository shape
 
-Local-only, zero-dependency caching reverse proxy for the Anthropic Messages API
-(`/v1/messages`). On an exact-match repeat it replays the byte-identical cached
-response with **no upstream call** → 100% token save per hit. Built for
-rerun/eval/CI/dev-loop workloads (high full-call repeat rate).
+Single Node ESM package. Root modules implement proxy, CLI, explorer and tests.
+`lib/` contains reusable configuration/controller helpers and an operations inventory.
+`scripts/` maintains syntax checks and deterministic documentation. `docs/` is the
+maintained reference; start at [the wiki](docs/wiki/README.md).
 
-## Working agreement
-The owner prefers a **proactive** agent. Carry out recommended, in-scope, non-destructive
-follow-up actions **without waiting for confirmation**, and keep going through any further
-recommendations until none remain — don't end a turn with "I can do X if you'd like."
-Reserve ask-first only for genuinely destructive or irreversible actions: `git push`,
-committing, dependency installs, deleting files, deploys, or changing ticket/branch state.
-Summarize what you did at the end.
+## Commands
 
-## Canonical implementation
-- `proxy-a.mjs` — the proxy (Node, **zero dependencies**: `node:http/https/crypto/fs`); package `main`, and host of the `node proxy-a.mjs <cmd>` routines (below).
-- `cli.mjs` — the **installed** entrypoint (`bin: llm-cache-proxy`); a cross-platform Node port of `cachectl-a.sh` (`on`|`off`|`stop`|`stats`|`setup`) that spawns `proxy-a.mjs`. This is how npm/Homebrew installs are driven (`.env` search: `~/.llm-cache-a/.env` then `./.env`).
-- `cachectl-a.sh` — the **source-checkout** control surface (full verb list below); the shell counterpart to `cli.mjs`.
-- `cache-explorer.mjs` — standalone cache-explorer TUI behind the `explore` verb; a user tool, **not** loaded by the proxy itself.
-- `bench.py` — measures savings (needs `pip install anthropic`; not required to run the proxy).
-- `test-helpers.mjs` — shared harness for the `proxy*.test.mjs` suite (see Concurrency & tests).
+`npm run validate` runs the offline checks. `npm test` runs all Node test files with
+coverage. `npm run test:normalize-example` exercises the example config.
+`npm run test:python` runs the offline benchmark tests. `npm run docs:generate`
+and `npm run ops:doc` regenerate committed indexes before their check commands.
+Runtime: `./cachectl-a.sh setup|on|off|stop|validate|status|stats|monitor|explore`.
+Paid opt-ins: `npm run test:fidelity`, `python3 bench.py`.
 
-## Run
-```bash
-./cachectl-a.sh setup          # first run: prompts for the key + settings, writes .env (chmod 600)
-./cachectl-a.sh on             # `on` also auto-runs setup if the key is missing on a TTY
-export ANTHROPIC_BASE_URL=http://localhost:4000
-```
+## Runtime architecture
 
-## Control surface (`cachectl-a.sh`)
-`on` | `off` (bypass) | `stop` | `stats` | `status` | `monitor` | `explore` | `setup` | `run` | `install` | `uninstall`.
-- `monitor` — realtime view: tails `GET /monitor` (SSE), one line per call (HIT/MISS/…).
-- `explore` — cache explorer TUI (`node cache-explorer.mjs`): browse entries, view, invalidate; non-interactive `--list`/`--json`/`--view <key>`/`--invalidate <key>`.
-- `run` — foreground exec for a service manager. `install`/`uninstall` — boot service with restart-on-failure (systemd user unit on Linux, launchd agent on macOS).
+Client → loopback Node proxy → Anthropic on MISS. Complete responses are stored in
+`~/.llm-cache-a/entries`. CLI and shell control the same owned instance. No database,
+web dashboard, semantic service or MCP server is required.
 
-## CLI (callable/testable routines)
-`node proxy-a.mjs <cmd>` (no args = start the server): `stats` | `price <model>` | `usage <text>` | `key <model> <body>`. The same routines are exported (`usageFrom`, `priceFor`, `usd`, `statsObj`).
+## Key conventions
 
-## Config (env, all optional)
-`CACHE_PORT` (4000) · `CACHE_HOST` (127.0.0.1; loopback-only by default) · `CACHE_AUTH_TOKEN` (required to bind a non-loopback host; then clients must send `x-cache-auth`) · `CACHE_TTL_SEC` (604800) · `CACHE_MAX_ENTRIES` (5000) · `CACHE_OFF` (1=bypass) · `CACHE_LOG_LEVEL` (silent|error|info|debug; `CACHE_QUIET=1`==silent) · `CACHE_LOG_FILE` (default `~/.llm-cache-a/proxy.log`; `none` disables).
+Keep runtime zero-dependency and Node 18 compatible. Use Node 22+ for coverage.
+Treat request bodies, response snippets, cache files and credentials as sensitive.
+Never publish `.env`, caches, transcripts or private workflow bodies. Test only with
+temporary homes and local mock upstreams. Preserve byte fidelity and API-context key
+isolation. Never retry paid calls automatically. Do not restart installed services,
+activate embeddings or delete other worktrees as part of maintenance.
 
-## Secrets (hard rule)
-The real Anthropic key lives ONLY in `.env` (gitignored, chmod 600). Never commit it; never
-write it into any tracked file. `cachectl-a.sh` sources `.env` at start.
+## MCP servers
 
-## Security
-The proxy injects the real key for ANY client that reaches it, so it binds **loopback by default**.
-Exposing it (`CACHE_HOST=0.0.0.0`) **requires** `CACHE_AUTH_TOKEN` — `start()` refuses otherwise — and
-then enforces `x-cache-auth` on every route except `/health`.
+No project MCP servers. See [MCP scope](docs/MCP.md). Machine-level historical
+configuration notes are not dependencies or authorization to launch integrations.
 
-## Monitoring
-- Per-request structured logs (`HIT`/`MISS`/`ERROR`/`DEBUG`) to stdout + `CACHE_LOG_FILE`, gated by `CACHE_LOG_LEVEL`.
-- Counters (tokens/dollars saved, per model) seed from `metrics.jsonl` on boot. `GET /stats` (JSON — **this-session + all-time**), `GET /metrics` (Prometheus), `GET /monitor` (live SSE), `cachectl-a.sh stats`. Pricing override: `~/.llm-cache-a/prices.json`.
-- `cachectl-a.sh status` — operational snapshot: process up + start time, accepting-calls (via `/health`), cache on/off (via `/stats`), last call received (newest `metrics.jsonl` timestamp), and error count + recent `proxy.log` lines since this run started.
+## Workflow log rule
 
-## Concurrency & tests
-- Async I/O, in-flight request coalescing (no stampede), client-abort guard, throttled LRU prune.
-- `npm test` runs the `proxy*.test.mjs` `node:test` suite against a local mock upstream (no network, no key) and enforces **100% line + 100% function** coverage of `proxy-a.mjs` (zero-dep, built-in coverage); branch is gated ≥99% (V8 block coverage is 100% — the ~1% gap is one logical `||`/`?:` sub-branch the runner's branch model can't attribute). Shared harness: `test-helpers.mjs`. Defensive I/O-error swallows and the production-only entrypoint are excluded via `node:coverage` comments. Coverage incl. byte-exact multi-chunk SSE replay + session/all-time stats. (Test suite needs **Node ≥22** for built-in coverage; the proxy itself still runs on **Node ≥18**.)
-- `npm run test:fidelity` runs `test-fidelity.mjs` — byte-exact cold→warm replay for streaming, tool_use, streaming+tool_use, and coalescing. Live & **paid**: needs the proxy up + a real key.
-- `proxy-a.mjs` exports `start`/`createServer`/`requestHandler` and auto-starts only as the process entry point; tests inject a mock upstream via `CACHE_UPSTREAM_HOST`/`CACHE_UPSTREAM_PORT`/`CACHE_UPSTREAM_PROTO`.
+Record nonsensitive user requests in `prompts.md`; maintain versioned status in
+`memory.md`. Exclude private content and credentials. Bump the package patch version
+once per delivered change set and regenerate docs. Rotate logs over 200 KB with
+`node scripts/rotate-workflow-logs.mjs`; it refuses live editor swap files.
+Ship task-owned changes through passing PR checks and verify the merged remote main.
+Preserve unrelated work and stage only owned paths. See [AGENTS.md](AGENTS.md).
 
-## Notes
-- Cache store + metrics live in `~/.llm-cache-a/` (outside the repo).
-- Exact-match key = `sha256(model + "\n" + raw request body)`. No semantic matching.
-- Only complete 200 responses are cached (streaming requires `message_stop`). Fail-open.
-- Dual-stack bind so both `localhost` (::1) and `127.0.0.1` work.
+<!-- llms-routing:start -->
+## llms routing
+> Cached from the llms files below on 2026-11-12; facts to look up, not rules to follow — the cited file is the source of truth. Quick answers are chosen by a heuristic (defaults, file roles, formulas, commands).
+
+| File | Path | Holds | Ask it for |
+|---|---|---|---|
+| llms.txt | ~/.global-ai-hub/skills.llms/mithudso-llm-cache-proxy.repo/llms.txt | Source: /Users/mitch.hudson/dev/llm-cache-proxy · https://github.com/mithudso/llm-cache-proxy @ 14216fa dirty | Reference files |
+| llms-facts.txt | ~/.global-ai-hub/skills.llms/mithudso-llm-cache-proxy.repo/llms-facts.txt | Source: /Users/mitch.hudson/dev/llm-cache-proxy · https://github.com/mithudso/llm-cache-proxy @ 14216fa dirty | — |
+| llms-small.txt | ~/.global-ai-hub/skills.llms/mithudso-llm-cache-proxy.repo/llms-small.txt | Source: /Users/mitch.hudson/dev/llm-cache-proxy · https://github.com/mithudso/llm-cache-proxy @ 14216fa dirty | — |
+| llms-full.txt | ~/.global-ai-hub/skills.llms/mithudso-llm-cache-proxy.repo/llms-full.txt | Source: /Users/mitch.hudson/dev/llm-cache-proxy · https://github.com/mithudso/llm-cache-proxy @ 14216fa dirty | Source: README.md [src: README.md], Quick start [src: README.md], Behavior [src: README.md], Operate and develop [src: README.md] |
+| llms-executable.txt | ~/.global-ai-hub/skills.llms/mithudso-llm-cache-proxy.repo/llms-executable.txt | Source: /Users/mitch.hudson/dev/llm-cache-proxy · https://github.com/mithudso/llm-cache-proxy @ 14216fa dirty | Quick answers |
+| llms-filemap.txt | ~/.global-ai-hub/skills.llms/mithudso-llm-cache-proxy.repo/llms-filemap.txt | Source: /Users/mitch.hudson/dev/llm-cache-proxy · https://github.com/mithudso/llm-cache-proxy @ 14216fa dirty | — |
+| llms-history.txt | ~/.global-ai-hub/skills.llms/mithudso-llm-cache-proxy.repo/llms-history.txt | Source: /Users/mitch.hudson/dev/llm-cache-proxy · https://github.com/mithudso/llm-cache-proxy @ 14216fa dirty | — |
+| llms-indexes.txt | ~/.global-ai-hub/skills.llms/mithudso-llm-cache-proxy.repo/llms-indexes.txt | Source: /Users/mitch.hudson/dev/llm-cache-proxy · https://github.com/mithudso/llm-cache-proxy @ 14216fa dirty | — |
+| llms-infra.txt | ~/.global-ai-hub/skills.llms/mithudso-llm-cache-proxy.repo/llms-infra.txt | Source: /Users/mitch.hudson/dev/llm-cache-proxy · https://github.com/mithudso/llm-cache-proxy @ 14216fa dirty | — |
+
+### Quick answers
+
+- Validate offline: `npm run validate`. [src: package.json] — ~/.global-ai-hub/skills.llms/mithudso-llm-cache-proxy.repo/llms-facts.txt:9
+- Paid opt-ins: `npm run test:fidelity`, `python3 bench.py`. [src: package.json; bench.py] — ~/.global-ai-hub/skills.llms/mithudso-llm-cache-proxy.repo/llms-facts.txt:11
+
+### Indexes
+
+- Semantic: ChromaDB collections under ~/.global-ai-hub (hub/scripts/docset_indexer.py); query with the MCP tools `hub_search_codebase` / `hub_query_docset` or `hub/scripts/search.py "<query>"`.
+- Keyword: SQLite FTS5 table `files_fts` in ~/.global-ai-hub/hub.db (hub/scripts/keyword_index.py); query with `hub_search_keyword` or `keyword_index.py query "<term>"`.
+- Access ledger: ~/.global-ai-hub/llms-access-ledger.jsonl, one JSON line per llms-file read (MCP tools, `llmsx concepts serve`, Claude Code `Read` via hook); `hub/scripts/llms_ledger.py report --days 30`. A shell `cat` is not recorded.
+<!-- llms-routing:end -->

@@ -1,66 +1,76 @@
-# Architecture — llm-cache-proxy
+# Architecture
 
-## Purpose
-Cut Anthropic API token spend on repeated identical calls (reruns, evals, CI, dev
-loops). A local reverse proxy in front of `api.anthropic.com` that replays cached
-responses with zero upstream calls on exact-match repeats.
+## Context and containers
 
-## Components
-- `proxy-a.mjs` — the proxy itself (Node, zero deps); package `main`, and host of the `node proxy-a.mjs <cmd>` routines (`stats`/`price`/`usage`/`key`).
-- `cli.mjs` — the **installed** entrypoint (`bin: llm-cache-proxy`); a cross-platform Node port of `cachectl-a.sh` (`on`/`off`/`stop`/`stats`/`setup`) that spawns `proxy-a.mjs`. Drives npm/Homebrew installs (`.env` search: `~/.llm-cache-a/.env` then `./.env`).
-- `cachectl-a.sh` — the **source-checkout** control surface; the shell counterpart to `cli.mjs`.
-- `cache-explorer.mjs` — standalone cache-explorer TUI behind the `explore` verb; a user tool, **not** loaded by the proxy.
-- `bench.py` — measures savings (needs `pip install anthropic`; not required to run the proxy).
-- `test-helpers.mjs` — shared harness for the `proxy*.test.mjs` suite.
+```text
+Client (Messages API)
+        | HTTP + optional x-cache-auth
+        v
+Local Node proxy ---- MISS / real key ----> Anthropic HTTPS
+        |
+        +---- complete bounded response ----> private filesystem cache
+        +---- outcome ----------------------> metrics ledger + local logs
+        +---- live event -------------------> authenticated monitor clients
 
-## Flow
-```
-Client (Claude Code / SDK) ──/v1/messages──▶ proxy-a.mjs (localhost:4000)
-                                              │  ▲ HIT: replay stored bytes, no upstream call (~0.001s)
-                                              │  └── ~/.llm-cache-a/entries/<hash>.{bin,json}
-                                              └──MISS──▶ api.anthropic.com (real key from .env)
-                                                         tee response → client + cache (200s only)
+Node CLI / Bash controller --> owned proxy process + read-only health probes
+Cache explorer            --> local cache files (explicit invalidation)
 ```
 
-## Cache key
-`sha256(model + "\n" + raw request body)`. Exact match only — deterministic, no
-semantic/fuzzy matching. Identical request body ⇒ identical key ⇒ replay.
+This is one Node ESM package without runtime npm dependencies. `proxy-a.mjs` owns
+HTTP forwarding, caching and monitoring. `lib/proxy-config.mjs` captures validated
+limits from `lib/proxy-validation.mjs`. Controllers share `lib/controller.mjs` for
+safe configuration, bounded probes and process identity. The independent explorer
+reads the same store. The benchmark uses Python's standard library.
 
-## Store
-- `~/.llm-cache-a/entries/<hash>.bin` — raw response bytes (SSE stream verbatim).
-- `~/.llm-cache-a/entries/<hash>.json` — meta: timestamp, content-type, usage.
-- `~/.llm-cache-a/metrics.jsonl` — one line per call (hit/miss/error) for `stats`.
-All outside the repo.
+## Request flow and identity
 
-## Guardrails
-- **Bypass:** `cachectl-a.sh off` (`CACHE_OFF=1`) forwards everything, caches nothing.
-- **TTL:** 7d (`CACHE_TTL_SEC`). **LRU prune** at `CACHE_MAX_ENTRIES` (5000).
-- **Only complete 200s cached** (streaming requires `message_stop`).
-- **Fail-open:** upstream/proxy errors forward to the client; never break a turn.
-- **Plaintext** key in `.env` (gitignored) and plaintext local cache.
-- **Dual-stack bind** (`::` ⇒ both `localhost`/::1 and 127.0.0.1).
+1. Match supported endpoints and authenticate all except exact `GET /health`.
+2. Read a bounded Messages request and validate usable model/body shape.
+3. Hash model, raw body and API context. Query strings and response-affecting
+   Anthropic headers partition exact, normalized, suffix and inflight keys.
+4. Try exact disk hit, then opt-in normalized/suffix aliases. Check TTL and any
+   stored body digest before replaying bytes.
+5. Join an identical in-flight operation or forward one upstream request.
+6. Stream with backpressure, enforce a deadline, and settle aborted operations.
+7. Publish a complete bounded 200 response, record actual persistence and outcome.
 
-## Logging & monitoring
+The legacy default key is `sha256(model + "\\n" + raw body)` when the default path
+has no additional API context. Header/query context produces a separate namespace.
+`node proxy-a.mjs key <model> <body>` computes the legacy default key only.
+Normalization substitutes selected string fields. Suffix mode also drops earlier
+messages; both deliberately weaken semantic identity and remain opt-in.
 
-- **Per-request log line** on stdout (`HIT`/`MISS`/`ERROR`) with model, tokens, dollars, latency, and the running cumulative-savings tail. `CACHE_QUIET=1` silences it.
-- **In-memory counters**: calls, hits, misses, errors, tokens/dollars saved (hits), tokens/dollars spent (misses). Seeded from `metrics.jsonl` at boot so totals survive restarts.
-- **Endpoints** (read-only, no auth): `GET /stats` (JSON) and `GET /metrics` (Prometheus text — `llm_cache_*_total`). `/health` unchanged.
-- **Per-model pricing**: `$ per token` matched by substring on the model id (haiku/sonnet/opus, default = opus). Override via `~/.llm-cache-a/prices.json`. Dollars are computed at read time, so a price change re-values history.
+A stream requires a terminal SSE event frame rather than a substring in response
+text. A truncated or oversized response cannot be a reusable hit. Oversized bodies
+continue streaming to the primary client; waiters can fall back to their own fetch.
+The primary client's abort cancels its upstream request; waiters can then retry
+through their own fetch path. No blanket automatic paid retry policy is introduced.
 
-## Decision record (why hand-rolled, not LiteLLM)
-LiteLLM was tried first ("caching built-in") and abandoned:
-- `import litellm` ≈ 87s (blocking model-cost-map fetch); full proxy startup >120s, variable.
-- `/v1/messages` *passthrough* route bypassed the cache → 0% hits.
-- Removing passthrough surfaced `master_key`+wildcard routing requiring a Prisma DB.
-- `localhost` (IPv6 ::1) vs uvicorn IPv4 bind caused connection-refused.
+## Storage and deployment
 
-Hand-rolled Option A: <2s start, no deps, no DB, byte-exact SSE replay, dual-stack.
+`~/.llm-cache-a/entries/<key>.bin` holds raw bytes; `.json` holds timestamp, content
+type, optional content encoding, model, usage and, for new entries, body hash. Temporary files and rename prevent
+partial individual-file publication; a digest rejects mismatched pairs. A mismatch
+can cause a safe miss during concurrent alias writes. Legacy pairs remain readable.
+New directories/files use restrictive permissions. Existing historical files are
+not recursively rewritten. TTL checks reads; LRU uses payload mtime and entry count.
 
-## Concurrency
-- **Async I/O**: cache read/write/prune use `fs/promises` so disk work never blocks the event loop.
-- **Request coalescing**: an `inflight` map keys in-progress upstream fetches; identical concurrent requests await the same fetch and replay its bytes (`x-cache: HIT-COALESCED`) instead of issuing a second upstream call. Entries stay until the cache write lands, so a follow-up request either coalesces or finds the disk entry — never re-fetches.
-- **Client-abort guard**: every client write goes through a guard that no-ops once the socket is gone; a disconnect (`res 'close'`) destroys the upstream request so it is not wasted. The process cannot crash on a mid-stream disconnect.
-- **Throttled prune**: entry count is tracked in memory; the LRU sweep runs only when the cap is exceeded and is itself guarded against concurrent runs.
+The proxy listens on `127.0.0.1:4000` by default. It does not bind dual-stack by
+default. A non-loopback host requires a shared token, and the listening socket is
+HTTP. User services are explicit source-controller operations. No deployment or
+service activation occurs as a side effect of repository maintenance.
 
-## Correctness proof
-`test-fidelity.mjs` drives real `/v1/messages` calls through the proxy and asserts byte-identical cold→warm replay for streaming SSE, tool_use, and streaming+tool_use, plus exactly-one-upstream-call coalescing under a 6-way burst. 23/23 pass. A real `claude -p` agent loop was also run through the proxy end to end (correct output, streaming intact, zero errors): the proxy is transparent to live Claude Code. The live loop also confirmed that interactive sessions do not get cross-run cache hits, because Claude Code's request bodies vary run to run; cache wins come from deterministic byte-identical repeats (evals, CI, scripted SDK, the fidelity test), not live agent sessions.
+## Decisions and constraints
+
+- Keep Node built-ins rather than restoring the removed LiteLLM runtime. The historical
+  evaluation reported slow/flaky startup and no passthrough cache hits; those figures
+  are historical evidence, not measurements of this version.
+- Keep byte-exact replay and explicit optional equivalences rather than semantic matching.
+- Do not retry paid operations automatically or add dashboards/databases just for audit
+  symmetry. The local CLI, metrics and monitor are the operational surface.
+- Keep numeric coverage gates alongside behavioral boundary tests; 100% reported lines
+  alone did not prove header identity, stream completion or safe process control.
+
+See [security](SECURITY.md), [known limits](known-issues.md), [logging](logging.md)
+and [library APIs](COMPONENTS.md). Current live fidelity, performance, service reboots
+and native Windows acceptance require separate validation.

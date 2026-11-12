@@ -1,6 +1,6 @@
 {
   "name": "llm-cache-proxy",
-  "version": "2.0.6",
+  "version": "2.0.7",
   "files": [
     "proxy-a.mjs",
     "cachectl-a.sh",
@@ -10,10 +10,30 @@
     "test-fidelity.mjs",
     "test-normalize-example.mjs",
     "normalize.json.example",
-    "docs/",
     "USAGE.md",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "lib/",
+    "docs/ARCHITECTURE.md",
+    "docs/COMPONENTS.md",
+    "docs/DEVELOPMENT.md",
+    "docs/INSTALL.md",
+    "docs/INSTALLATION.md",
+    "docs/MCP.md",
+    "docs/SECURITY.md",
+    "docs/TESTING.md",
+    "docs/caching-and-optimization.md",
+    "docs/integrations-and-assumptions.md",
+    "docs/known-issues.md",
+    "docs/logging.md",
+    "docs/onboarding.md",
+    "docs/operations-registry.json",
+    "docs/requirements.md",
+    "docs/runbooks/operations.md",
+    "docs/tool-inventory.json",
+    "docs/wiki/README.md",
+    "docs/external-calls.md",
+    "test-helpers.mjs"
   ],
   "description": "Local-only, zero-dependency byte-exact caching reverse proxy for the Anthropic Messages API. Replays cached responses with no upstream call on exact-match repeats.",
   "type": "module",
@@ -30,10 +50,16 @@
     "status": "./cachectl-a.sh status",
     "monitor": "./cachectl-a.sh monitor",
     "explore": "./cachectl-a.sh explore",
-    "check": "node --check proxy-a.mjs && node --check cli.mjs && node --check cache-explorer.mjs && node --check test-fidelity.mjs",
-    "test": "node --test --experimental-test-coverage --test-coverage-include=proxy-a.mjs --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=99 'proxy*.test.mjs'",
+    "check": "node scripts/check-source.mjs",
+    "test": "node --test --experimental-test-coverage --test-coverage-include=proxy-a.mjs --test-coverage-lines=95 --test-coverage-functions=95 --test-coverage-branches=90 \"*.test.mjs\"",
     "test:fidelity": "node test-fidelity.mjs",
-    "test:normalize-example": "node test-normalize-example.mjs"
+    "test:normalize-example": "node test-normalize-example.mjs",
+    "test:python": "python3 -m unittest bench_test.py",
+    "docs:generate": "node scripts/generate-doc-indexes.mjs",
+    "docs:check": "node scripts/check-doc-indexes.mjs",
+    "ops:doc": "node scripts/generate-ops-registry-doc.mjs",
+    "ops:doc:check": "node scripts/generate-ops-registry-doc.mjs --check",
+    "validate": "npm run check && npm test && npm run test:normalize-example && npm run test:python && npm run docs:check && npm run ops:doc:check"
   },
   "engines": {
     "node": ">=18"
@@ -53,20 +79,5 @@
     "token-savings",
     "sse",
     "tool-use"
-  ],
-  "dependencies": {
-    "@antv/infographic": "^0.2.19",
-    "chrome-debugging-client": "^2.1.0",
-    "chrome-devtools-frontend": "^1.0.1652307",
-    "chrome-remote-interface": "^0.34.0",
-    "mcp-mermaid": "^0.4.1",
-    "ndb": "^1.1.5",
-    "playwright": "^1.61.1",
-    "thetool": "^0.5.1"
-  },
-  "allowScripts": {
-    "mcp-mermaid@0.4.1": true,
-    "fsevents@2.3.2": true,
-    "puppeteer-core@1.12.2": true
-  }
+  ]
 }

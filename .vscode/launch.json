@@ -1,0 +1,1 @@
+{"version": "0.2.0", "configurations": [{"name": "Proxy with deliberate local config", "type": "node", "request": "launch", "program": "${workspaceFolder}/proxy-a.mjs", "envFile": "${workspaceFolder}/.env", "console": "integratedTerminal"}]}

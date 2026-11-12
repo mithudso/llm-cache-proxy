@@ -19,16 +19,18 @@ jobs:
     steps:
       - name: Compute tag, version, url, and sha256 of the release tarball
         id: meta
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          TAG="${{ github.event.release.tag_name }}"
-          case "$TAG" in
-            v*) : ;;
-            *) echo "::error::tag '$TAG' does not start with 'v'"; exit 1 ;;
-          esac
+          set -euo pipefail
+          TAG="$RELEASE_TAG"
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::release tag must be vMAJOR.MINOR.PATCH"; exit 1
+          fi
           VERSION="${TAG#v}"
           URL="https://github.com/${{ github.repository }}/archive/refs/tags/${TAG}.tar.gz"
           SHA="$(curl -fsSL "$URL" | shasum -a 256 | awk '{print $1}')"
-          if [ -z "$SHA" ]; then echo "::error::failed to compute sha256"; exit 1; fi
+          if ! [[ "$SHA" =~ ^[0-9a-f]{64}$ ]]; then echo "::error::failed to compute sha256"; exit 1; fi
           {
             echo "tag=$TAG"
             echo "version=$VERSION"
